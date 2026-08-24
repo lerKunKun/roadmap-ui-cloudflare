@@ -106,11 +106,7 @@ function AdminWorkspace({ onLogout }: { onLogout(): Promise<void> }) {
     const saved = projectEditor === "new"
       ? await createProject(input)
       : await updateProject(projectEditor!.id, input)
-    setProjects((current) => {
-      const exists = current.some((project) => project.id === saved.id)
-      return (exists ? current.map((project) => project.id === saved.id ? saved : project) : [...current, saved])
-        .sort((a, b) => a.sortOrder - b.sortOrder)
-    })
+    setProjects(await listAdminProjects())
     setSelectedProjectId(saved.id)
     setNotice(projectEditor === "new" ? "项目已创建" : "项目已更新")
   }

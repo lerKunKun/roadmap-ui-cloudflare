@@ -58,7 +58,9 @@ async function installAdminApi(page: Page) {
 
   await page.route("https://e2e.supabase.co/rest/v1/projects**", async (route) => {
     const method = route.request().method()
-    if (method === "GET") return json(route, projects)
+    if (method === "GET") {
+      return json(route, [...projects].sort((a, b) => a.sort_order - b.sort_order))
+    }
     if (method === "POST") {
       const payload = route.request().postDataJSON() as Record<string, unknown>
       const created = { id: CREATED_PROJECT_ID, ...payload }
@@ -101,9 +103,14 @@ async function installAdminApi(page: Page) {
       target_project_id: string
       target_sort_order: number
     }
-    const project = projects.find((candidate) => candidate.id === payload.target_project_id)!
-    project.sort_order = payload.target_sort_order
-    await json(route, payload.target_sort_order)
+    const target = projects.find((candidate) => candidate.id === payload.target_project_id)!
+    const ordered = projects
+      .filter((candidate) => candidate.id !== payload.target_project_id)
+      .sort((a, b) => a.sort_order - b.sort_order)
+    const finalOrder = Math.min(payload.target_sort_order, ordered.length)
+    ordered.splice(finalOrder, 0, target)
+    ordered.forEach((project, index) => { project.sort_order = index })
+    await json(route, finalOrder)
   })
 
   await page.route(/^https:\/\/e2e\.supabase\.co\/rest\/v1\/roadmap_items(?:\?|$)/, async (route) => {
@@ -150,8 +157,10 @@ test("管理端仅需密码并完成项目与条目 CRUD", async ({ page }) => {
   await page.getByLabel("项目名称").fill("模板工具")
   await page.getByLabel("项目标识").fill("template-tools")
   await page.getByLabel("项目网址").fill("templates.example.test")
+  await page.getByLabel("项目排序").fill("0")
   await page.getByRole("button", { name: "保存项目" }).click()
   await expect(page.getByLabel("切换项目")).toHaveValue(CREATED_PROJECT_ID)
+  await expect(page.getByLabel("切换项目").locator("option").first()).toHaveText("模板工具")
 
   await page.getByRole("button", { name: "Roadmap 条目" }).click()
   await page.getByLabel("标题").fill("批量生成模板")

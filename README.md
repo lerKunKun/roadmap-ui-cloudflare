@@ -24,11 +24,15 @@ npm run dev
 ```powershell
 npm run test:run
 npm run test:e2e
+npm run test:functions
 npm run supabase:test
 npm run lint
 npm run typecheck
 npm run build
 ```
+
+`test:functions` 需要本地 Supabase 已启动，并已按部署手册创建
+`supabase/.env.local`；它会自动启动和关闭 Edge Functions 本地运行时。
 
 生成生产管理员强密码：
 
