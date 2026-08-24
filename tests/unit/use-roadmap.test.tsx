@@ -100,4 +100,17 @@ describe("useRoadmap", () => {
 
     expect(result.current.notice).toBe("建议已提交，但列表刷新失败")
   })
+
+  it("retries the project list after the initial request fails", async () => {
+    vi.mocked(listProjects)
+      .mockRejectedValueOnce(new Error("项目列表加载失败"))
+      .mockResolvedValueOnce([project])
+    const { result } = renderHook(() => useRoadmap())
+
+    await waitFor(() => expect(result.current.error).toBe("项目列表加载失败"))
+    await act(() => result.current.reload())
+    await waitFor(() => expect(result.current.selectedProject?.id).toBe(project.id))
+
+    expect(listProjects).toHaveBeenCalledTimes(2)
+  })
 })

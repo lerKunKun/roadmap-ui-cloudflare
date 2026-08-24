@@ -133,7 +133,8 @@ export async function createProject(input: ProjectInput): Promise<Project> {
     .single()
 
   mutationError(error, "项目创建失败")
-  return mapProjectRow(data as Parameters<typeof mapProjectRow>[0])
+  const project = mapProjectRow(data as Parameters<typeof mapProjectRow>[0])
+  return { ...project, sortOrder: await moveProject(project.id, input.sortOrder) }
 }
 
 export async function updateProject(id: string, input: ProjectInput): Promise<Project> {
@@ -145,7 +146,21 @@ export async function updateProject(id: string, input: ProjectInput): Promise<Pr
     .single()
 
   mutationError(error, "项目更新失败")
-  return mapProjectRow(data as Parameters<typeof mapProjectRow>[0])
+  const project = mapProjectRow(data as Parameters<typeof mapProjectRow>[0])
+  return { ...project, sortOrder: await moveProject(project.id, input.sortOrder) }
+}
+
+export async function moveProject(id: string, sortOrder: number): Promise<number> {
+  if (!Number.isSafeInteger(sortOrder) || sortOrder < 0) {
+    throw new Error("排序值无效")
+  }
+
+  const { data, error } = await getSupabaseBrowserClient().rpc("move_project", {
+    target_project_id: id,
+    target_sort_order: sortOrder,
+  })
+  mutationError(error, "项目排序失败")
+  return Number(data)
 }
 
 export async function deleteProject(id: string): Promise<void> {
@@ -200,9 +215,13 @@ export async function moveRoadmapItem(
     throw new Error("排序值无效")
   }
 
-  const { error } = await getSupabaseBrowserClient()
-    .from("roadmap_items")
-    .update({ status, sort_order: sortOrder })
-    .eq("id", id)
+  const { error } = await getSupabaseBrowserClient().rpc(
+    "move_roadmap_item",
+    {
+      target_item_id: id,
+      target_status: status,
+      target_sort_order: sortOrder,
+    },
+  )
   mutationError(error, "Roadmap 状态更新失败")
 }

@@ -23,51 +23,37 @@ export function useRoadmap() {
   const [notice, setNotice] = useState<string | null>(null)
   const [votingItemId, setVotingItemId] = useState<string | null>(null)
 
-  useEffect(() => {
-    let active = true
+  const loadAvailableProjects = useCallback(async () => {
+    setLoading(true)
+    setError(null)
 
-    async function loadAvailableProjects() {
-      setLoading(true)
-      setError(null)
-
-      try {
-        const availableProjects = await listProjects()
-
-        if (!active) {
-          return
-        }
-
-        setProjects(availableProjects)
-        setSelectedProjectId((current) =>
-          availableProjects.some((project) => project.id === current)
-            ? current
-            : (availableProjects[0]?.id ?? ""),
-        )
-      } catch (loadError) {
-        if (active) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "项目列表加载失败，请稍后重试",
-          )
-        }
-      } finally {
-        if (active) {
-          setLoading(false)
-        }
-      }
-    }
-
-    void loadAvailableProjects()
-
-    return () => {
-      active = false
+    try {
+      const availableProjects = await listProjects()
+      setProjects(availableProjects)
+      setSelectedProjectId((current) =>
+        availableProjects.some((project) => project.id === current)
+          ? current
+          : (availableProjects[0]?.id ?? ""),
+      )
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "项目列表加载失败，请稍后重试",
+      )
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    void Promise.resolve().then(loadAvailableProjects)
+  }, [loadAvailableProjects])
 
   const reload = useCallback(async () => {
     if (!selectedProjectId) {
       setItems([])
+      await loadAvailableProjects()
       return
     }
 
@@ -85,7 +71,7 @@ export function useRoadmap() {
     } finally {
       setLoading(false)
     }
-  }, [selectedProjectId])
+  }, [loadAvailableProjects, selectedProjectId])
 
   useEffect(() => {
     if (!selectedProjectId) {

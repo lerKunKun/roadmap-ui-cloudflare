@@ -12,7 +12,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core"
 import { CSS } from "@dnd-kit/utilities"
-import { GripVertical, Pencil, Trash2 } from "lucide-react"
+import { CalendarClock, GripVertical, Pencil, ThumbsUp, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -45,18 +45,27 @@ export function AdminBoard({
   function dragEnd(event: DragEndEvent) {
     const itemId = String(event.active.id)
     const overId = event.over ? String(event.over.id) : ""
-    if (!overId.startsWith("column:")) return
-    const status = overId.slice(7)
+    const overItem = overId.startsWith("item:")
+      ? items.find((item) => item.id === overId.slice(5))
+      : null
+    const status = overItem?.status ?? overId.slice(7)
     if (!STATUS_COLUMNS.some((column) => column.value === status)) return
-    const destination = items.filter((item) => item.status === status)
-    void onMove(itemId, status as RoadmapStatus, destination.length)
+    const destination = items
+      .filter((item) => item.status === status && item.id !== itemId)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+    const targetIndex = overItem
+      ? Math.max(0, destination.findIndex((item) => item.id === overItem.id))
+      : destination.length
+    void onMove(itemId, status as RoadmapStatus, targetIndex)
   }
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
       <div className="roadmap-board grid grid-flow-col gap-3 overflow-x-auto pb-3" aria-label="管理 Roadmap 看板">
         {STATUS_COLUMNS.map((column) => {
-          const columnItems = items.filter((item) => item.status === column.value)
+          const columnItems = items
+            .filter((item) => item.status === column.value)
+            .sort((a, b) => a.sortOrder - b.sortOrder)
           return (
             <AdminColumn
               key={column.value}
@@ -137,13 +146,28 @@ function AdminCard({
   onDelete(item: RoadmapItem): void
   onMove(itemId: string, status: RoadmapStatus, sortOrder: number): Promise<void>
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: item.id })
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDraggableRef,
+    transform,
+    isDragging,
+  } = useDraggable({ id: item.id })
+  const {
+    setNodeRef: setDroppableRef,
+    isOver,
+  } = useDroppable({ id: `item:${item.id}` })
+
+  function setCardRef(node: HTMLElement | null) {
+    setDraggableRef(node)
+    setDroppableRef(node)
+  }
 
   return (
     <article
-      ref={setNodeRef}
+      ref={setCardRef}
       style={{ transform: CSS.Translate.toString(transform) }}
-      className={`rounded-xl border bg-background p-3 shadow-xs ${isDragging ? "z-10 opacity-70 shadow-lg" : ""}`}
+      className={`rounded-xl border bg-background p-3 shadow-xs ${isDragging ? "z-10 opacity-70 shadow-lg" : ""} ${isOver && !isDragging ? "border-primary" : ""}`}
     >
       <div className="flex items-start gap-2">
         <button
@@ -159,6 +183,10 @@ function AdminCard({
           <h3 className="text-sm font-semibold leading-5">{item.title}</h3>
           {item.description ? <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.description}</p> : null}
         </div>
+      </div>
+      <div className="mt-2 flex items-center gap-3 pl-7 text-[0.7rem] text-muted-foreground">
+        <span className="inline-flex items-center gap-1"><ThumbsUp className="size-3" />{item.voteCount}</span>
+        <span className="inline-flex items-center gap-1"><CalendarClock className="size-3" />{new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(new Date(item.createdAt))}</span>
       </div>
       <div className="mt-3 flex items-center gap-1.5 border-t pt-2.5">
         <select

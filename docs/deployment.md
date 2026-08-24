@@ -62,7 +62,9 @@ npx supabase functions deploy submit-suggestion --no-verify-jwt
 npx supabase functions deploy vote --no-verify-jwt
 ```
 
-内置的 Supabase Secret Key 由平台注入 Edge Functions，不需要复制到本地或 Cloudflare。两个函数虽然允许匿名调用，但会校验 Publishable Key 和精确 Origin；投票函数只保存客户端 IP 的加盐 HMAC，不保存明文 IP。
+内置的 Supabase Secret Key 由平台注入 Edge Functions，不需要复制到本地或 Cloudflare。两个函数虽然允许匿名调用，但会校验 Publishable Key 和精确 Origin；投票函数只保存客户端 IP 的加盐 HMAC，不保存明文 IP。匿名建议同样使用独立上下文的 HMAC-IP 做基础防刷，每个公网 IP 每小时最多提交 10 条。
+
+`VOTE_IP_SALT` 必须长期稳定保存在 Function Secrets。更换它会让历史投票无法继续匹配同一 IP，相当于重置防重复基准；建议限流的新时间窗口也会从新哈希重新开始。
 
 ## 3. 配置 Cloudflare Pages
 
@@ -121,7 +123,7 @@ roadmap-ui.pages.dev
 
 1. `/` 能看到四个初始项目和五个阶段。
 2. 切换项目后只显示该项目的 Roadmap。
-3. 匿名建议进入“待处理”。
+3. 在管理端为“广告系统”“ks-alert”“模板工具”填写真实项目网址；匿名建议进入“待处理”，同一网络第 11 次小时内提交会被拒绝。
 4. 同一公网 IP 对同一条目第一次投票成功，第二次提示已经投过，票数不增加。
 5. `/admin/` 只显示密码输入框；错误密码不能登录。
 6. 管理员可新增/编辑/删除项目和条目、调整状态、退出登录。

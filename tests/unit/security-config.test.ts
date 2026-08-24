@@ -10,6 +10,7 @@ describe("production security configuration", () => {
     expect(headers).toContain("connect-src 'self' https://*.supabase.co wss://*.supabase.co")
     expect(headers).toContain("X-Content-Type-Options: nosniff")
     expect(headers).toContain("X-Frame-Options: DENY")
+    expect(headers).toContain("Strict-Transport-Security: max-age=31536000")
     expect(headers).toContain("Permissions-Policy:")
     expect(headers).not.toContain("connect-src *")
   })

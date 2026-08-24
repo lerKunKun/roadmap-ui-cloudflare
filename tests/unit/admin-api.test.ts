@@ -11,7 +11,10 @@ import {
   deleteProject,
   moveRoadmapItem,
 } from "@/features/roadmap/admin-api"
-import { signInAdmin } from "@/features/admin/use-admin-session"
+import {
+  isAdminSession,
+  signInAdmin,
+} from "@/features/admin/use-admin-session"
 
 describe("admin Roadmap API", () => {
   beforeEach(() => {
@@ -31,8 +34,10 @@ describe("admin Roadmap API", () => {
     })
     const select = vi.fn(() => ({ single }))
     const insert = vi.fn(() => ({ select }))
+    const rpc = vi.fn().mockResolvedValue({ data: 0, error: null })
     getSupabaseBrowserClient.mockReturnValue({
       from: vi.fn(() => ({ insert })),
+      rpc,
     })
 
     const project = await createProject({
@@ -49,16 +54,35 @@ describe("admin Roadmap API", () => {
       sort_order: 0,
     })
     expect(project.projectUrl).toBe("https://ads.example.com/")
+    expect(rpc).toHaveBeenCalledWith("move_project", {
+      target_project_id: "project-1",
+      target_sort_order: 0,
+    })
   })
 
   it("拒绝未知状态，不向数据库发送请求", async () => {
     const from = vi.fn()
-    getSupabaseBrowserClient.mockReturnValue({ from })
+    const rpc = vi.fn()
+    getSupabaseBrowserClient.mockReturnValue({ from, rpc })
 
     await expect(
       moveRoadmapItem("item-1", "archived" as never, 0),
     ).rejects.toThrow("Roadmap 状态无效")
     expect(from).not.toHaveBeenCalled()
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it("通过数据库函数原子移动并重排条目", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: null })
+    getSupabaseBrowserClient.mockReturnValue({ rpc })
+
+    await moveRoadmapItem("item-1", "in_progress", 2)
+
+    expect(rpc).toHaveBeenCalledWith("move_roadmap_item", {
+      target_item_id: "item-1",
+      target_status: "in_progress",
+      target_sort_order: 2,
+    })
   })
 
   it("把有关联条目的项目删除错误翻译成可操作提示", async () => {
@@ -102,5 +126,13 @@ describe("admin Roadmap API", () => {
     })
 
     await expect(signInAdmin("wrong-password")).rejects.toThrow("密码不正确")
+  })
+
+  it("只把固定邮箱的会话识别为管理员", () => {
+    expect(
+      isAdminSession({ user: { email: "roadmap-admin@internal.invalid" } }),
+    ).toBe(true)
+    expect(isAdminSession({ user: { email: "viewer@example.com" } })).toBe(false)
+    expect(isAdminSession(null)).toBe(false)
   })
 })

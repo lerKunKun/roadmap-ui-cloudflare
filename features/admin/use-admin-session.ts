@@ -11,6 +11,12 @@ function adminEmail() {
   return process.env.NEXT_PUBLIC_ADMIN_EMAIL?.trim() || DEFAULT_ADMIN_EMAIL
 }
 
+export function isAdminSession(
+  session: { user?: { email?: string } } | null,
+) {
+  return session?.user?.email === adminEmail()
+}
+
 export async function signInAdmin(password: string): Promise<Session | null> {
   const { data, error } = await getSupabaseBrowserClient().auth.signInWithPassword({
     email: adminEmail(),
@@ -81,7 +87,7 @@ export function useAdminSession() {
   }, [])
 
   return {
-    authenticated: Boolean(session),
+    authenticated: isAdminSession(session),
     checking,
     pending,
     error,

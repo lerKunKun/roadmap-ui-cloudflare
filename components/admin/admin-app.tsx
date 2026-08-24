@@ -131,13 +131,8 @@ function AdminWorkspace({ onLogout }: { onLogout(): Promise<void> }) {
     const saved = itemEditor === "new"
       ? await createRoadmapItem(input)
       : await updateRoadmapItem(itemEditor!.id, input)
-    setItems((current) => {
-      const existing = current.find((item) => item.id === saved.id)
-      const withVoteCount = existing ? { ...saved, voteCount: existing.voteCount } : saved
-      return existing
-        ? current.map((item) => item.id === saved.id ? withVoteCount : item)
-        : [...current, withVoteCount]
-    })
+    await moveRoadmapItem(saved.id, input.status, input.sortOrder)
+    setItems(await listAdminRoadmapItems(selectedProjectId))
     setNotice(itemEditor === "new" ? "Roadmap 条目已创建" : "Roadmap 条目已更新")
   }
 
@@ -162,6 +157,14 @@ function AdminWorkspace({ onLogout }: { onLogout(): Promise<void> }) {
     } catch (moveError) {
       setItems(before)
       setError(moveError instanceof Error ? moveError.message : "阶段更新失败")
+      setMovingItemId(null)
+      return
+    }
+
+    try {
+      setItems(await listAdminRoadmapItems(selectedProjectId))
+    } catch {
+      setNotice("阶段已更新，但列表刷新失败")
     } finally {
       setMovingItemId(null)
     }

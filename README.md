@@ -7,7 +7,7 @@
 - Next.js 16 静态导出，部署到 Cloudflare Pages。
 - Supabase Postgres + RLS 存储项目、条目和匿名投票。
 - Supabase Auth 提供单一管理员密码登录。
-- Supabase Edge Functions 处理匿名建议和 IP 去重投票。
+- Supabase Edge Functions 处理匿名建议限流和 IP 去重投票。
 
 ## 本地开发
 

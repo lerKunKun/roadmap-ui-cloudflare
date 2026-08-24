@@ -21,7 +21,9 @@ import type { RoadmapItem } from "@/features/roadmap/types"
 
 export function RoadmapApp() {
   const roadmap = useRoadmap()
-  const [detailItem, setDetailItem] = useState<RoadmapItem | null>(null)
+  const [detailItemId, setDetailItemId] = useState<string | null>(null)
+  const detailItem =
+    roadmap.items.find((item) => item.id === detailItemId) ?? null
 
   return (
     <main className="min-h-svh">
@@ -147,7 +149,7 @@ export function RoadmapApp() {
             <RoadmapBoard
               items={roadmap.items}
               votingItemId={roadmap.votingItemId}
-              onOpenItem={setDetailItem}
+              onOpenItem={(item: RoadmapItem) => setDetailItemId(item.id)}
               onVote={roadmap.vote}
             />
           )}
@@ -166,7 +168,7 @@ export function RoadmapApp() {
         voting={roadmap.votingItemId === detailItem?.id}
         onOpenChange={(open) => {
           if (!open) {
-            setDetailItem(null)
+            setDetailItemId(null)
           }
         }}
         onVote={roadmap.vote}

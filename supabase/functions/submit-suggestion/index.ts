@@ -4,6 +4,7 @@ import { getCorsHeaders, parseAllowedOrigins } from "../_shared/cors.ts"
 import { jsonResponse, withResponseHeaders } from "../_shared/http.ts"
 import { getRuntimeEnv } from "../_shared/runtime.ts"
 import { suggestionSchema } from "../_shared/validation.ts"
+import { hashIp, normalizeIp } from "../_shared/vote-security.ts"
 
 const submitSuggestion = withSupabase(
   { auth: "publishable" },
@@ -35,6 +36,39 @@ const submitSuggestion = withSupabase(
 
     if (!project) {
       return jsonResponse({ message: "项目不存在或已被删除" }, 404)
+    }
+
+    const sourceIp = request.headers.get("cf-connecting-ip")
+    const salt = getRuntimeEnv("VOTE_IP_SALT")
+
+    if (!sourceIp) {
+      return jsonResponse({ message: "无法识别当前网络，暂时不能提交建议" }, 400)
+    }
+
+    if (!salt) {
+      return jsonResponse({ message: "建议服务尚未配置" }, 500)
+    }
+
+    let quotaHash: string
+
+    try {
+      quotaHash = await hashIp(normalizeIp(sourceIp), `suggestion:${salt}`)
+    } catch {
+      return jsonResponse({ message: "无法识别当前网络，暂时不能提交建议" }, 400)
+    }
+
+    const { data: quotaAvailable, error: quotaError } =
+      await context.supabaseAdmin.rpc("consume_suggestion_quota", {
+        target_ip_hash: quotaHash,
+        max_allowed: 10,
+      })
+
+    if (quotaError) {
+      return jsonResponse({ message: "暂时无法校验提交频率，请稍后重试" }, 500)
+    }
+
+    if (!quotaAvailable) {
+      return jsonResponse({ message: "当前网络提交过于频繁，请一小时后再试" }, 429)
     }
 
     const { data: item, error: insertError } = await context.supabaseAdmin

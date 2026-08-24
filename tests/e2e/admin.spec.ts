@@ -82,7 +82,31 @@ async function installAdminApi(page: Page) {
     await json(route, items.filter((entry) => entry.project_id === projectId).map((entry) => ({ ...entry, vote_count: 0 })))
   })
 
-  await page.route("https://e2e.supabase.co/rest/v1/roadmap_items**", async (route) => {
+  await page.route("https://e2e.supabase.co/rest/v1/rpc/move_roadmap_item", async (route) => {
+    const payload = route.request().postDataJSON() as {
+      target_item_id: string
+      target_status: string
+      target_sort_order: number
+    }
+    const entry = items.find((candidate) => candidate.id === payload.target_item_id)!
+    Object.assign(entry, {
+      status: payload.target_status,
+      sort_order: payload.target_sort_order,
+      updated_at: timestamp,
+    })
+    await json(route, null)
+  })
+  await page.route("https://e2e.supabase.co/rest/v1/rpc/move_project", async (route) => {
+    const payload = route.request().postDataJSON() as {
+      target_project_id: string
+      target_sort_order: number
+    }
+    const project = projects.find((candidate) => candidate.id === payload.target_project_id)!
+    project.sort_order = payload.target_sort_order
+    await json(route, payload.target_sort_order)
+  })
+
+  await page.route(/^https:\/\/e2e\.supabase\.co\/rest\/v1\/roadmap_items(?:\?|$)/, async (route) => {
     const method = route.request().method()
     const id = new URL(route.request().url()).searchParams.get("id")?.replace("eq.", "")
     if (method === "POST") {

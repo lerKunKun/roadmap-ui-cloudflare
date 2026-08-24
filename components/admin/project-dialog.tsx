@@ -32,6 +32,7 @@ export function ProjectDialog({
   const [name, setName] = useState(project?.name ?? "")
   const [slug, setSlug] = useState(project?.slug ?? "")
   const [projectUrl, setProjectUrl] = useState(project?.projectUrl ?? "")
+  const [sortOrder, setSortOrder] = useState(project?.sortOrder ?? nextSortOrder)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -44,7 +45,7 @@ export function ProjectDialog({
         name,
         slug,
         projectUrl,
-        sortOrder: project?.sortOrder ?? nextSortOrder,
+        sortOrder,
       })
       onOpenChange(false)
     } catch (saveError) {
@@ -97,6 +98,19 @@ export function ProjectDialog({
               onChange={(event) => setProjectUrl(event.target.value)}
               placeholder="https://example.com"
             />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="project-sort-order">项目排序</Label>
+            <Input
+              id="project-sort-order"
+              type="number"
+              min={0}
+              step={1}
+              value={sortOrder}
+              onChange={(event) => setSortOrder(Number(event.target.value))}
+              required
+            />
+            <p className="text-xs text-muted-foreground">数字越小，在项目切换器中越靠前。</p>
           </div>
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           <DialogFooter>

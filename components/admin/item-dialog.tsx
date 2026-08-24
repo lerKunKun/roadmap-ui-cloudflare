@@ -39,6 +39,7 @@ export function ItemDialog({
   const [title, setTitle] = useState(item?.title ?? "")
   const [description, setDescription] = useState(item?.description ?? "")
   const [status, setStatus] = useState<RoadmapStatus>(item?.status ?? "pending")
+  const [sortOrder, setSortOrder] = useState(item?.sortOrder ?? nextSortOrder)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -52,7 +53,7 @@ export function ItemDialog({
         title,
         description,
         status,
-        sortOrder: item?.sortOrder ?? nextSortOrder,
+        sortOrder,
       })
       onOpenChange(false)
     } catch (saveError) {
@@ -105,6 +106,19 @@ export function ItemDialog({
                 <option key={column.value} value={column.value}>{column.label}</option>
               ))}
             </select>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="item-sort-order">同阶段排序</Label>
+            <Input
+              id="item-sort-order"
+              type="number"
+              min={0}
+              step={1}
+              value={sortOrder}
+              onChange={(event) => setSortOrder(Number(event.target.value))}
+              required
+            />
+            <p className="text-xs text-muted-foreground">数字越小越靠前，也可在看板中拖动排序。</p>
           </div>
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           <DialogFooter>
