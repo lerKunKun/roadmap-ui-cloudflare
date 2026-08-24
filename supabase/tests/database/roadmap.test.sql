@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(18);
+select plan(21);
 
 select has_table('public', 'projects', 'projects table exists');
 select has_table('public', 'roadmap_items', 'roadmap_items table exists');
@@ -56,6 +56,9 @@ select ok(has_table_privilege('anon', 'public.roadmap_items_public', 'select'), 
 select ok(not has_table_privilege('anon', 'public.projects', 'insert'), 'anon cannot insert projects');
 select ok(not has_table_privilege('anon', 'public.roadmap_items', 'insert'), 'anon cannot insert items');
 select ok(not has_table_privilege('anon', 'public.votes', 'select'), 'anon cannot read vote hashes');
+select ok(has_table_privilege('service_role', 'public.projects', 'select'), 'Edge Functions can read projects');
+select ok(has_table_privilege('service_role', 'public.roadmap_items', 'insert'), 'Edge Functions can insert suggestions');
+select ok(has_table_privilege('service_role', 'public.votes', 'insert'), 'Edge Functions can insert votes');
 
 select is(
   (select set_config('request.jwt.claims', '{"email":"viewer@internal.invalid"}', true)),

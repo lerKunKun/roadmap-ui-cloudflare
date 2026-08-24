@@ -143,6 +143,10 @@ grant select on table public.roadmap_items to anon, authenticated;
 grant select on table public.roadmap_items_public to anon, authenticated;
 grant insert, update, delete on table public.projects to authenticated;
 grant insert, update, delete on table public.roadmap_items to authenticated;
+grant select on table public.projects to service_role;
+grant select, insert on table public.roadmap_items to service_role;
+grant insert on table public.votes to service_role;
+grant select on table public.roadmap_items_public to service_role;
 
 comment on table public.votes is 'Stores HMAC-SHA-256 client IP hashes; plaintext IP addresses are never persisted.';
 comment on view public.roadmap_items_public is 'Public-safe roadmap items with aggregate vote counts and no vote identifiers.';
