@@ -14,6 +14,7 @@
     "test:run": "vitest run",
     "test:e2e": "playwright test",
     "test:functions": "node scripts/test-local-functions.mjs",
+    "deploy:check": "node scripts/deployment-inputs.mjs",
     "admin-password": "node scripts/generate-admin-password.mjs",
     "supabase:test": "supabase test db"
   },

@@ -43,3 +43,11 @@ npm run admin-password
 不要提交 `.env.local`、管理员密码、Supabase Secret/Service Role Key 或 `VOTE_IP_SALT`。
 
 完整的 Supabase、Cloudflare Pages、域名和 DNS 步骤见 [部署手册](docs/deployment.md)。
+
+生产上线前只需填写本地私密文件 `.env.deploy.local`，然后运行：
+
+```powershell
+npm run deploy:check
+```
+
+该文件受 `.gitignore` 保护，校验命令也不会输出任何配置值。

@@ -5,11 +5,18 @@
 ## 1. 上线前需要准备
 
 - Supabase 项目的 `Project Ref`、`Project URL`、`Publishable Key`。
-- 一个已接入 Cloudflare 的 Git 仓库；当前仓库尚未配置 Git remote。
 - 最终域名，建议使用 `roadmap.你的域名`。
-- Supabase CLI 与 Cloudflare 账号登录权限。
+- Supabase 与 Cloudflare 的部署权限。
 
 以下值不能提交到 Git，也不要粘贴到公开聊天：Supabase Access Token、数据库密码、Secret/Service Role Key、管理员密码、`VOTE_IP_SALT`。
+
+所有必填项已经集中在项目根目录的 `.env.deploy.local`。填写后运行：
+
+```powershell
+npm run deploy:check
+```
+
+只有看到“16 项检查通过”才进入部署。文件受 Git 忽略保护，检查结果只显示字段名，绝不会显示密码、Token 或密钥。Cloudflare 将使用 Pages Direct Upload，因此不强制要求 GitHub/GitLab 仓库。
 
 ## 2. 配置 Supabase
 
@@ -70,7 +77,7 @@ npx supabase functions deploy vote --no-verify-jwt
 
 ### 3.1 创建 Pages 项目
 
-将本仓库推送到 GitHub/GitLab 后，在 Cloudflare Dashboard → Workers & Pages → Create → Pages → Import an existing Git repository 中选择仓库。
+可以将仓库连接 GitHub/GitLab，也可以使用 Wrangler Direct Upload。当前部署采用 Direct Upload，后续需要自动持续部署时再连接 Git 仓库。
 
 建议项目名：`roadmap-ui`。构建配置：
 
