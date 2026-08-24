@@ -56,6 +56,7 @@ export function RoadmapApp() {
 
               {roadmap.selectedProject?.projectUrl ? (
                 <Button
+                  nativeButton={false}
                   variant="outline"
                   size="lg"
                   render={
