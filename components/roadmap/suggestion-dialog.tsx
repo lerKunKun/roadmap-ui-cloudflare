@@ -1,0 +1,169 @@
+"use client"
+
+import { useState, type FormEvent } from "react"
+import { Lightbulb, Plus } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import type { Project, SuggestionInput } from "@/features/roadmap/types"
+
+interface SuggestionDialogProps {
+  projects: Project[]
+  selectedProjectId: string
+  onSubmit(input: SuggestionInput): Promise<void>
+}
+
+export function SuggestionDialog({
+  projects,
+  selectedProjectId,
+  onSubmit,
+}: SuggestionDialogProps) {
+  const [open, setOpen] = useState(false)
+  const [projectId, setProjectId] = useState(selectedProjectId)
+  const [title, setTitle] = useState("")
+  const [description, setDescription] = useState("")
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function handleOpenChange(nextOpen: boolean) {
+    setOpen(nextOpen)
+    setError(null)
+
+    if (nextOpen && !title && !description) {
+      setProjectId(selectedProjectId)
+    }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const cleanTitle = title.trim()
+    const cleanDescription = description.trim()
+
+    if (cleanTitle.length < 2) {
+      setError("建议标题至少需要 2 个字符")
+      return
+    }
+
+    setPending(true)
+    setError(null)
+
+    try {
+      await onSubmit({
+        projectId,
+        title: cleanTitle,
+        description: cleanDescription,
+      })
+      setTitle("")
+      setDescription("")
+      setOpen(false)
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : "建议提交失败",
+      )
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger
+        render={
+          <Button size="lg" disabled={projects.length === 0} />
+        }
+      >
+        <Plus data-icon="inline-start" />
+        提交建议
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <div className="mb-1 flex size-9 items-center justify-center rounded-lg bg-blue-50 text-primary dark:bg-blue-950">
+            <Lightbulb className="size-4" />
+          </div>
+          <DialogTitle>提交 Roadmap 建议</DialogTitle>
+          <DialogDescription>
+            你的建议会先进入“待处理”，管理员确认后再安排后续阶段。
+          </DialogDescription>
+        </DialogHeader>
+
+        <form className="grid gap-4" onSubmit={handleSubmit}>
+          <div className="grid gap-1.5">
+            <Label htmlFor="suggestion-project">所属项目</Label>
+            <select
+              id="suggestion-project"
+              className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              value={projectId}
+              onChange={(event) => setProjectId(event.target.value)}
+              required
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="suggestion-title">建议标题</Label>
+              <span className="text-[0.7rem] tabular-nums text-muted-foreground">
+                {title.length}/120
+              </span>
+            </div>
+            <Input
+              id="suggestion-title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              minLength={2}
+              maxLength={120}
+              placeholder="用一句话说明你希望增加的能力"
+              required
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="suggestion-description">详细说明</Label>
+              <span className="text-[0.7rem] tabular-nums text-muted-foreground">
+                {description.length}/4000
+              </span>
+            </div>
+            <Textarea
+              id="suggestion-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              maxLength={4000}
+              placeholder="补充使用场景、期望结果或当前遇到的问题"
+              className="min-h-28 resize-y"
+            />
+          </div>
+
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+
+          <DialogFooter className="mt-1">
+            <Button type="submit" disabled={pending || !projectId}>
+              {pending ? "提交中…" : "确认提交"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
