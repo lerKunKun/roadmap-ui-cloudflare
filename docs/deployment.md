@@ -57,12 +57,12 @@ Authentication 设置要求：
 
 ### 2.3 部署函数和私密变量
 
-先准备最终 Origin，不带末尾斜杠。`VOTE_IP_SALT` 应是独立随机值，不能与管理员密码相同：
+先准备允许调用匿名 Edge Functions 的公开端 Origin，不带末尾斜杠；多个来源使用英文逗号分隔。`VOTE_IP_SALT` 应是独立随机值，不能与管理员密码相同：
 
 ```powershell
-$env:ROADMAP_PRODUCTION_ORIGIN = "https://roadmap.example.com"
+$env:ROADMAP_ALLOWED_ORIGINS = "https://telljax.com,https://roadmap-ui.pages.dev"
 $voteSalt = node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-npx supabase secrets set "VOTE_IP_SALT=$voteSalt" "ALLOWED_ORIGINS=$env:ROADMAP_PRODUCTION_ORIGIN"
+npx supabase secrets set "VOTE_IP_SALT=$voteSalt" "ALLOWED_ORIGINS=$env:ROADMAP_ALLOWED_ORIGINS"
 Remove-Variable voteSalt
 
 npx supabase functions deploy submit-suggestion --use-api --import-map supabase/functions/deno.json --no-verify-jwt --yes
@@ -119,12 +119,36 @@ roadmap-ui.pages.dev
 | --- | --- | --- |
 | CNAME | `roadmap` | `roadmap-ui.pages.dev` |
 
+当前生产域名使用同一个 Pages 项目，DNS 配置如下：
+
+| 用途 | 类型 | 名称 | 目标 | 代理状态 |
+| --- | --- | --- | --- | --- |
+| 用户端 | CNAME | `telljax.com` | `roadmap-ui.pages.dev` | 已代理 |
+| 管理端 | CNAME | `admin.telljax.com` | `roadmap-ui.pages.dev` | 已代理 |
+
 - 如果域名的 DNS 已托管在同一个 Cloudflare 账号，确认 Custom domain 后 Cloudflare 会自动创建记录，无需再手工添加。
 - 如果 DNS 在其他服务商，添加上表 CNAME；目标必须替换为 Pages 实际分配的 `*.pages.dev` 地址。
 - 如果使用根域名而非子域名，需要先把整个域名 Zone/Nameserver 接入 Cloudflare。
 - 若已有严格 CAA 记录，需确认允许 Cloudflare 支持的 CA 签发证书。
 
-域名确认后，再把 Supabase `ALLOWED_ORIGINS` 与 Authentication Site URL 更新成同一个 `https://` 地址。
+域名确认后分别核对 Supabase 配置：
+
+- Edge Functions 的 `ALLOWED_ORIGINS` 保持为公开用户端来源 `https://telljax.com,https://roadmap-ui.pages.dev`，供匿名建议和投票使用。
+- Authentication Site URL 保持为 `https://telljax.com`。
+- 不把 `https://admin.telljax.com` 加入 `ALLOWED_ORIGINS`：管理端使用 Supabase Auth 与受 RLS 保护的数据接口，不调用匿名 Edge Functions。
+
+### 3.3 管理端独立入口
+
+将 `admin.telljax.com` 添加为 `roadmap-ui` 的第二个 Custom domain。为避免管理子域名根路径仍显示用户端，在 Cloudflare → Rules → Redirect Rules 中创建并启用规则“管理端根路径”：
+
+```text
+匹配条件：(http.host eq "admin.telljax.com" and http.request.uri.path eq "/")
+目标表达式：concat("https://admin.telljax.com", "/admin/")
+状态码：302
+保留查询字符串：开启
+```
+
+该规则只处理 `admin.telljax.com/`，不会改变 `telljax.com/` 或 `admin.telljax.com/admin/`。管理端仍复用同一份静态前端、Supabase 项目和管理员账号。
 
 ## 4. 上线验收
 
@@ -147,7 +171,8 @@ Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码
 - Supabase migration：`20260824000000_roadmap.sql`
 - Edge Functions：`submit-suggestion`、`vote`
 - Cloudflare Pages：`https://roadmap-ui.pages.dev`
-- 自定义域名：`https://telljax.com`（Cloudflare Pages 状态 active）
+- 用户端：`https://telljax.com`（Cloudflare Pages 状态 active）
+- 管理端：`https://admin.telljax.com`（根路径 302 到 `/admin/`，Cloudflare Pages 状态 active）
 
 ## 5. 回滚与免费额度注意事项
 

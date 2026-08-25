@@ -55,6 +55,7 @@ npm run deploy:check
 ## 生产部署
 
 - Pages：<https://roadmap-ui.pages.dev>
-- 自定义域名：<https://telljax.com>
+- 用户端：<https://telljax.com>
+- 管理端：<https://admin.telljax.com>（根路径自动进入 `/admin/`）
 - Supabase migration：`20260824000000_roadmap.sql`
 - Edge Functions：`submit-suggestion`、`vote`
