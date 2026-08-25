@@ -65,9 +65,11 @@ $voteSalt = node -e "console.log(require('node:crypto').randomBytes(32).toString
 npx supabase secrets set "VOTE_IP_SALT=$voteSalt" "ALLOWED_ORIGINS=$env:ROADMAP_PRODUCTION_ORIGIN"
 Remove-Variable voteSalt
 
-npx supabase functions deploy submit-suggestion --no-verify-jwt
-npx supabase functions deploy vote --no-verify-jwt
+npx supabase functions deploy submit-suggestion --use-api --import-map supabase/functions/deno.json --no-verify-jwt --yes
+npx supabase functions deploy vote --use-api --import-map supabase/functions/deno.json --no-verify-jwt --yes
 ```
+
+`--import-map` 必须显式传入，否则服务端打包不会解析项目级 `deno.json` 中的 npm 导入别名。
 
 内置的 Supabase Secret Key 由平台注入 Edge Functions，不需要复制到本地或 Cloudflare。两个函数虽然允许匿名调用，但会校验 Publishable Key 和精确 Origin；投票函数只保存客户端 IP 的加盐 HMAC，不保存明文 IP。匿名建议同样使用独立上下文的 HMAC-IP 做基础防刷，每个公网 IP 每小时最多提交 10 条。
 
@@ -139,6 +141,13 @@ roadmap-ui.pages.dev
 9. 手机宽度下页面不整体横向溢出，看板内部可横向滚动。
 
 Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码或 Secret Key。
+
+## 当前生产状态（2026-08-25）
+
+- Supabase migration：`20260824000000_roadmap.sql`
+- Edge Functions：`submit-suggestion`、`vote`
+- Cloudflare Pages：`https://roadmap-ui.pages.dev`
+- 自定义域名：等待确认是否替换 `telljax.com` 根域名现有 A 记录
 
 ## 5. 回滚与免费额度注意事项
 
