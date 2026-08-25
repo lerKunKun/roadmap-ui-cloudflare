@@ -147,7 +147,7 @@ Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码
 - Supabase migration：`20260824000000_roadmap.sql`
 - Edge Functions：`submit-suggestion`、`vote`
 - Cloudflare Pages：`https://roadmap-ui.pages.dev`
-- 自定义域名：等待确认是否替换 `telljax.com` 根域名现有 A 记录
+- 自定义域名：`https://telljax.com`（Cloudflare Pages 状态 active）
 
 ## 5. 回滚与免费额度注意事项
 

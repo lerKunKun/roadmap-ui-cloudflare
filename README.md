@@ -55,6 +55,6 @@ npm run deploy:check
 ## 生产部署
 
 - Pages：<https://roadmap-ui.pages.dev>
+- 自定义域名：<https://telljax.com>
 - Supabase migration：`20260824000000_roadmap.sql`
 - Edge Functions：`submit-suggestion`、`vote`
-- 自定义域名：等待确认根域名 DNS 迁移
