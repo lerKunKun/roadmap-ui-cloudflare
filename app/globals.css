@@ -48,7 +48,7 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
+    --background: oklch(0.982 0.005 255);
     --foreground: oklch(0.141 0.005 285.823);
     --card: oklch(1 0 0);
     --card-foreground: oklch(0.141 0.005 285.823);
@@ -121,9 +121,28 @@
     @apply border-border outline-ring/50;
     }
   body {
-    @apply bg-background text-foreground;
+    @apply min-h-svh bg-background text-foreground;
+    text-rendering: optimizeLegibility;
     }
   html {
     @apply font-sans;
+    scroll-behavior: smooth;
+    }
+}
+
+::selection {
+    background: color-mix(in oklch, var(--primary) 20%, transparent);
+}
+
+.roadmap-board {
+    grid-auto-columns: minmax(18rem, 1fr);
+    scrollbar-color: color-mix(in oklch, var(--primary) 24%, transparent) transparent;
+    scrollbar-width: thin;
+}
+
+@media (min-width: 100rem) {
+    .roadmap-board {
+        grid-auto-flow: row;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
     }
 }
