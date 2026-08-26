@@ -146,16 +146,16 @@ export async function handleMediaRequest(
     return errorResponse(400, "图片地址无效")
   }
 
-  if (!hasRuntimeEnvironment(context.env)) {
-    return errorResponse(503, "图片服务暂不可用")
-  }
-
   const cacheRequest = new Request(requestUrl.origin + requestUrl.pathname)
 
   try {
     const cachedResponse = await dependencies.cacheMatch(cacheRequest)
     if (cachedResponse) {
       return successfulResponse(cachedResponse.clone(), "HIT")
+    }
+
+    if (!hasRuntimeEnvironment(context.env)) {
+      return errorResponse(503, "图片服务暂不可用")
     }
 
     const record = await dependencies.lookupPublicImage(imageId, context.env)

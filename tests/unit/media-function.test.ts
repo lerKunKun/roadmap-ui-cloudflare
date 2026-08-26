@@ -152,7 +152,7 @@ describe("media Pages Function", () => {
 
     expect(response.status).toBe(503)
     expect(response.headers.get("Cache-Control")).toBe("no-store")
-    expect(dependencies.cacheMatch).not.toHaveBeenCalled()
+    expect(dependencies.cacheMatch).toHaveBeenCalledOnce()
     expect(dependencies.lookupPublicImage).not.toHaveBeenCalled()
     expect(dependencies.downloadPrivateImage).not.toHaveBeenCalled()
   })
@@ -320,6 +320,32 @@ describe("media Pages Function", () => {
 
     const response = await onRequest(context)
 
+    expect(response.headers.get("X-Roadmap-Cache")).toBe("HIT")
+    expect(cacheMatch).toHaveBeenCalledOnce()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("serves a production cache HIT when Supabase runtime values are absent", async () => {
+    const cached = new Response(IMAGE_BYTES, {
+      headers: { "Content-Type": "image/png" },
+    })
+    const cacheMatch = vi.fn().mockResolvedValue(cached)
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    vi.stubGlobal("caches", {
+      default: { match: cacheMatch, put: vi.fn() },
+    })
+    const { context } = makeContext({
+      env: {
+        SUPABASE_URL: "",
+        SUPABASE_PUBLISHABLE_KEY: "",
+        SUPABASE_SECRET_KEY: "",
+      },
+    })
+
+    const response = await onRequest(context)
+
+    expect(response.status).toBe(200)
     expect(response.headers.get("X-Roadmap-Cache")).toBe("HIT")
     expect(cacheMatch).toHaveBeenCalledOnce()
     expect(fetchSpy).not.toHaveBeenCalled()
