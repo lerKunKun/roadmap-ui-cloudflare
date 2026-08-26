@@ -33,6 +33,8 @@ const item: RoadmapItem = {
   status: "pending",
   sortOrder: 0,
   voteCount: 3,
+  hasImage: false,
+  imageId: null,
   createdAt: "2026-08-24T08:00:00.000Z",
   updatedAt: "2026-08-24T08:00:00.000Z",
 }

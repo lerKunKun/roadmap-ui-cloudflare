@@ -35,6 +35,16 @@ interface AdminItemRow {
   updated_at: string
 }
 
+interface AdminImageMetadataRow {
+  id: string
+  roadmap_item_id: string
+  storage_path: string
+  mime_type: string
+  size_bytes: number
+  width: number
+  height: number
+}
+
 const projectSchema = z.object({
   name: z.string().trim().min(1, "请输入项目名称").max(80),
   slug: z
@@ -108,8 +118,35 @@ function mapAdminItem(row: AdminItemRow): RoadmapItem {
     status: row.status,
     sortOrder: row.sort_order,
     voteCount: 0,
+    hasImage: false,
+    imageId: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+async function getAdminRoadmapImageMetadata(
+  itemId: string
+): Promise<AdminImageMetadataRow | null> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("roadmap_item_images")
+    .select("id,roadmap_item_id,storage_path,mime_type,size_bytes,width,height")
+    .eq("roadmap_item_id", itemId)
+    .maybeSingle()
+
+  if (error) throw new Error("Roadmap 图片元数据加载失败")
+  return data as AdminImageMetadataRow | null
+}
+
+async function hydrateAdminItem(row: AdminItemRow): Promise<RoadmapItem> {
+  const item = mapAdminItem(row)
+  const image = await getAdminRoadmapImageMetadata(item.id)
+  const imageIsPublic = !["pending", "rejected"].includes(item.status)
+
+  return {
+    ...item,
+    hasImage: image !== null,
+    imageId: image && imageIsPublic ? image.id : null,
   }
 }
 
@@ -179,7 +216,7 @@ export async function createRoadmapItem(input: RoadmapItemInput): Promise<Roadma
     .single()
 
   mutationError(error, "Roadmap 条目创建失败")
-  return mapAdminItem(data as AdminItemRow)
+  return hydrateAdminItem(data as AdminItemRow)
 }
 
 export async function updateRoadmapItem(
@@ -194,7 +231,7 @@ export async function updateRoadmapItem(
     .single()
 
   mutationError(error, "Roadmap 条目更新失败")
-  return mapAdminItem(data as AdminItemRow)
+  return hydrateAdminItem(data as AdminItemRow)
 }
 
 export async function deleteRoadmapItem(id: string): Promise<void> {

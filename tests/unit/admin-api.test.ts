@@ -8,8 +8,10 @@ vi.mock("@/lib/supabase/browser", () => ({ getSupabaseBrowserClient }))
 
 import {
   createProject,
+  createRoadmapItem,
   deleteProject,
   moveRoadmapItem,
+  updateRoadmapItem,
 } from "@/features/roadmap/admin-api"
 import {
   isAdminSession,
@@ -17,6 +19,20 @@ import {
 } from "@/features/admin/use-admin-session"
 
 describe("admin Roadmap API", () => {
+  const itemId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+  const projectId = "11111111-1111-4111-8111-111111111111"
+  const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+  const itemRow = {
+    id: itemId,
+    project_id: projectId,
+    title: "告警截图",
+    description: "复现信息",
+    status: "approved",
+    sort_order: 0,
+    created_at: "2026-08-24T08:00:00.000Z",
+    updated_at: "2026-08-24T09:00:00.000Z",
+  }
+
   beforeEach(() => {
     getSupabaseBrowserClient.mockReset()
   })
@@ -83,6 +99,80 @@ describe("admin Roadmap API", () => {
       target_status: "in_progress",
       target_sort_order: 2,
     })
+  })
+
+  it("创建条目后从认证元数据补全已有公开图片", async () => {
+    const itemSingle = vi.fn().mockResolvedValue({ data: itemRow, error: null })
+    const itemSelect = vi.fn(() => ({ single: itemSingle }))
+    const insert = vi.fn(() => ({ select: itemSelect }))
+    const metadataMaybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: imageId,
+        roadmap_item_id: itemId,
+        storage_path: `suggestions/${itemId}/${imageId}.png`,
+        mime_type: "image/png",
+        size_bytes: 128,
+        width: 20,
+        height: 10,
+      },
+      error: null,
+    })
+    const metadataEq = vi.fn(() => ({ maybeSingle: metadataMaybeSingle }))
+    const metadataSelect = vi.fn(() => ({ eq: metadataEq }))
+    const from = vi.fn((table: string) =>
+      table === "roadmap_items" ? { insert } : { select: metadataSelect }
+    )
+    getSupabaseBrowserClient.mockReturnValue({ from })
+
+    const created = await createRoadmapItem({
+      projectId,
+      title: itemRow.title,
+      description: itemRow.description,
+      status: "approved",
+      sortOrder: 0,
+    })
+
+    expect(from).toHaveBeenCalledWith("roadmap_item_images")
+    expect(metadataEq).toHaveBeenCalledWith("roadmap_item_id", itemId)
+    expect(created).toMatchObject({ hasImage: true, imageId })
+  })
+
+  it("更新为拒绝状态后保留图片存在性但不暴露图片 ID", async () => {
+    const rejectedRow = { ...itemRow, status: "rejected" }
+    const itemSingle = vi
+      .fn()
+      .mockResolvedValue({ data: rejectedRow, error: null })
+    const itemSelect = vi.fn(() => ({ single: itemSingle }))
+    const eqItem = vi.fn(() => ({ select: itemSelect }))
+    const update = vi.fn(() => ({ eq: eqItem }))
+    const metadataMaybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: imageId,
+        roadmap_item_id: itemId,
+        storage_path: `suggestions/${itemId}/${imageId}.png`,
+        mime_type: "image/png",
+        size_bytes: 128,
+        width: 20,
+        height: 10,
+      },
+      error: null,
+    })
+    const metadataEq = vi.fn(() => ({ maybeSingle: metadataMaybeSingle }))
+    const metadataSelect = vi.fn(() => ({ eq: metadataEq }))
+    const from = vi.fn((table: string) =>
+      table === "roadmap_items" ? { update } : { select: metadataSelect }
+    )
+    getSupabaseBrowserClient.mockReturnValue({ from })
+
+    const updated = await updateRoadmapItem(itemId, {
+      projectId,
+      title: itemRow.title,
+      description: itemRow.description,
+      status: "rejected",
+      sortOrder: 0,
+    })
+
+    expect(updated).toMatchObject({ hasImage: true, imageId: null })
   })
 
   it("把有关联条目的项目删除错误翻译成可操作提示", async () => {

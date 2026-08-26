@@ -37,6 +37,8 @@ beforeEach(() => {
 })
 
 describe("Roadmap API mapping", () => {
+  const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
   it("maps database project fields into the UI model", () => {
     expect(
       mapProjectRow({
@@ -65,10 +67,51 @@ describe("Roadmap API mapping", () => {
         status: "approved",
         sort_order: 1,
         vote_count: "42",
+        has_image: true,
+        image_id: imageId,
         created_at: "2026-08-24T08:00:00.000Z",
         updated_at: "2026-08-24T09:00:00.000Z",
-      }).voteCount
-    ).toBe(42)
+      })
+    ).toMatchObject({ voteCount: 42, hasImage: true, imageId })
+  })
+
+  it("maps a pending image without exposing its identifier", () => {
+    expect(
+      mapRoadmapItemRow({
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        project_id: "11111111-1111-4111-8111-111111111111",
+        title: "告警截图",
+        description: "复现信息",
+        status: "pending",
+        sort_order: 0,
+        vote_count: 0,
+        has_image: true,
+        image_id: null,
+        created_at: "2026-08-24T08:00:00.000Z",
+        updated_at: "2026-08-24T09:00:00.000Z",
+      })
+    ).toMatchObject({ hasImage: true, imageId: null })
+  })
+
+  it.each([
+    { has_image: "true", image_id: null, status: "approved" },
+    { has_image: true, image_id: "not-a-uuid", status: "approved" },
+    { has_image: true, image_id: imageId, status: "pending" },
+    { has_image: true, image_id: imageId, status: "rejected" },
+  ])("refuses invalid public image metadata %#", (imageFields) => {
+    expect(() =>
+      mapRoadmapItemRow({
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        project_id: "11111111-1111-4111-8111-111111111111",
+        title: "告警截图",
+        description: "复现信息",
+        sort_order: 0,
+        vote_count: 0,
+        ...imageFields,
+        created_at: "2026-08-24T08:00:00.000Z",
+        updated_at: "2026-08-24T09:00:00.000Z",
+      })
+    ).toThrow("Roadmap 图片元数据无效")
   })
 
   it("refuses unknown database statuses", () => {
@@ -81,6 +124,8 @@ describe("Roadmap API mapping", () => {
         status: "archived",
         sort_order: 1,
         vote_count: 0,
+        has_image: false,
+        image_id: null,
         created_at: "2026-08-24T08:00:00.000Z",
         updated_at: "2026-08-24T09:00:00.000Z",
       })

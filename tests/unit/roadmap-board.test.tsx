@@ -16,6 +16,8 @@ const items: RoadmapItem[] = STATUS_COLUMNS.map((column, index) => ({
   status: column.value,
   sortOrder: index,
   voteCount: index + 3,
+  hasImage: false,
+  imageId: null,
   createdAt: "2026-08-24T08:00:00.000Z",
   updatedAt: "2026-08-24T08:00:00.000Z",
 }))

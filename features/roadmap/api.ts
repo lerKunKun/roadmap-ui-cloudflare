@@ -27,9 +27,14 @@ interface RoadmapItemRow {
   status: string
   sort_order: number
   vote_count: string | number | null
+  has_image: unknown
+  image_id: unknown
   created_at: string
   updated_at: string
 }
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 interface RoadmapStatusHistoryRow {
   id: number
@@ -60,6 +65,16 @@ export function mapRoadmapItemRow(row: RoadmapItemRow): RoadmapItem {
     throw new Error("Roadmap 票数无效")
   }
 
+  if (
+    typeof row.has_image !== "boolean" ||
+    (row.image_id !== null &&
+      (typeof row.image_id !== "string" || !UUID_PATTERN.test(row.image_id))) ||
+    (row.image_id !== null &&
+      (row.status === "pending" || row.status === "rejected"))
+  ) {
+    throw new Error("Roadmap 图片元数据无效")
+  }
+
   return {
     id: row.id,
     projectId: row.project_id,
@@ -68,6 +83,8 @@ export function mapRoadmapItemRow(row: RoadmapItemRow): RoadmapItem {
     status: row.status,
     sortOrder: row.sort_order,
     voteCount,
+    hasImage: row.has_image,
+    imageId: row.image_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -113,7 +130,7 @@ export async function listRoadmapItems(
   const { data, error } = await getSupabaseBrowserClient()
     .from("roadmap_items_public")
     .select(
-      "id,project_id,title,description,status,sort_order,vote_count,created_at,updated_at"
+      "id,project_id,title,description,status,sort_order,vote_count,has_image,image_id,created_at,updated_at"
     )
     .eq("project_id", projectId)
     .order("sort_order", { ascending: true })

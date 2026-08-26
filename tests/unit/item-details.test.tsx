@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -21,6 +21,8 @@ const item: RoadmapItem = {
   status: "approved",
   sortOrder: 0,
   voteCount: 8,
+  hasImage: false,
+  imageId: null,
   createdAt: "2026-08-24T08:00:00.000Z",
   updatedAt: "2026-08-24T16:30:00.000Z",
 }
@@ -43,12 +45,13 @@ const history: RoadmapStatusHistoryEntry[] = [
 ]
 
 function renderDetails(overrides?: {
+  item?: RoadmapItem
   onOpenChange?: (open: boolean) => void
   onVote?: (itemId: string) => void
 }) {
   return render(
     <ItemDetails
-      item={item}
+      item={overrides?.item ?? item}
       voting={false}
       onOpenChange={overrides?.onOpenChange ?? vi.fn()}
       onVote={overrides?.onVote ?? vi.fn()}
@@ -75,6 +78,108 @@ describe("ItemDetails", () => {
     ).toBeInTheDocument()
     expect(within(dialog).getByText("2026-08-25")).toBeInTheDocument()
     expect(document.querySelector('[data-slot="sheet-content"]')).toBeNull()
+  })
+
+  it("renders no image region when the item has no image", () => {
+    renderDetails()
+
+    expect(
+      screen.queryByRole("region", { name: "建议图片" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("shows an audit notice without requesting pending image bytes", () => {
+    renderDetails({ item: { ...item, status: "pending", hasImage: true } })
+
+    expect(
+      screen.getByText("图片正在审核，通过后将在此显示")
+    ).toBeInTheDocument()
+    expect(document.querySelector('img[src*="/media/"]')).toBeNull()
+  })
+
+  it("shows a rejection notice without requesting rejected image bytes", () => {
+    renderDetails({ item: { ...item, status: "rejected", hasImage: true } })
+
+    expect(screen.getByText("图片未通过审核，不对外显示")).toBeInTheDocument()
+    expect(document.querySelector('img[src*="/media/"]')).toBeNull()
+  })
+
+  it.each(["approved", "in_progress", "completed"] as const)(
+    "loads a %s image lazily from its canonical public URL",
+    (status) => {
+      const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      renderDetails({
+        item: { ...item, status, hasImage: true, imageId },
+      })
+
+      const image = screen.getByRole("img", {
+        name: `${item.title} 的建议图片`,
+      })
+      expect(image).toHaveAttribute("src", `/media/${imageId}`)
+      expect(image).toHaveAttribute("loading", "lazy")
+      expect(
+        screen
+          .getByRole("region", { name: "建议图片" })
+          .querySelector('[data-slot="skeleton"]')
+      ).toBeInTheDocument()
+    }
+  )
+
+  it("replaces the loading skeleton with the contained image on success", () => {
+    const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    renderDetails({ item: { ...item, hasImage: true, imageId } })
+    const image = screen.getByRole("img", {
+      name: `${item.title} 的建议图片`,
+    })
+
+    fireEvent.load(image)
+
+    expect(image).toHaveClass("max-h-72", "object-contain", "opacity-100")
+    expect(
+      screen
+        .getByRole("region", { name: "建议图片" })
+        .querySelector('[data-slot="skeleton"]')
+    ).toBeNull()
+  })
+
+  it("keeps the rest of the dialog visible when an image fails", async () => {
+    const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    renderDetails({ item: { ...item, hasImage: true, imageId } })
+    fireEvent.error(
+      screen.getByRole("img", { name: `${item.title} 的建议图片` })
+    )
+
+    expect(screen.getByText(item.description)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: `为“${item.title}”投票` })
+    ).toHaveTextContent("8")
+    expect(await screen.findByText("待处理 → 已批准")).toBeInTheDocument()
+    expect(
+      screen.getByText("票数仅用于辅助判断优先级，不代表明确交付承诺。")
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "重新加载" })).toHaveClass(
+      "border-border",
+      "bg-background"
+    )
+  })
+
+  it("retries by remounting the same canonical image URL", async () => {
+    const user = userEvent.setup()
+    const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    renderDetails({ item: { ...item, hasImage: true, imageId } })
+    const firstImage = screen.getByRole("img", {
+      name: `${item.title} 的建议图片`,
+    })
+    fireEvent.error(firstImage)
+
+    await user.click(screen.getByRole("button", { name: "重新加载" }))
+
+    const retriedImage = screen.getByRole("img", {
+      name: `${item.title} 的建议图片`,
+    })
+    expect(retriedImage).not.toBe(firstImage)
+    expect(retriedImage).toHaveAttribute("src", `/media/${imageId}`)
+    expect(retriedImage.getAttribute("src")).not.toContain("?")
   })
 
   it("shows timeline loading without hiding item details", () => {

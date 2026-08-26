@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
+import { ItemImage } from "@/components/roadmap/item-image"
 import { ItemTimeline } from "@/components/roadmap/item-timeline"
 import {
   buildRoadmapTimeline,
@@ -58,6 +59,7 @@ export function ItemDetails({
 
             <div className="grid min-h-0 overflow-y-auto md:grid-cols-[minmax(0,1.15fr)_minmax(17rem,0.85fr)]">
               <div className="p-5 md:border-r">
+                <ItemImage key={item.id} item={item} />
                 <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                   详细说明
                 </h3>

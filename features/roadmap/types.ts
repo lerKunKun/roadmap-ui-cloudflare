@@ -28,6 +28,8 @@ export interface RoadmapItem {
   status: RoadmapStatus
   sortOrder: number
   voteCount: number
+  hasImage: boolean
+  imageId: string | null
   createdAt: string
   updatedAt: string
 }

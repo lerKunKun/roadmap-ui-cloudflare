@@ -17,6 +17,8 @@ const item: RoadmapItem = {
   status: "in_progress",
   sortOrder: 0,
   voteCount: 0,
+  hasImage: false,
+  imageId: null,
   createdAt: "2026-08-24T15:30:00.000Z",
   updatedAt: "2026-08-25T02:00:00.000Z",
 }
