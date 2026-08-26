@@ -144,6 +144,47 @@ describe("validateSelectedSuggestionImage", () => {
 })
 
 describe("SuggestionImageField", () => {
+  it("copies the browser FileList before clearing the input value", async () => {
+    render(<ControlledImageField />)
+    const input = screen.getByLabelText("附加图片（可选）") as HTMLInputElement
+    const selectedFile = imageFile()
+    let selectedFiles = [selectedFile]
+    const liveFileList = {
+      get 0() {
+        return selectedFiles[0]
+      },
+      get length() {
+        return selectedFiles.length
+      },
+      item(index: number) {
+        return selectedFiles[index] ?? null
+      },
+      [Symbol.iterator]() {
+        return selectedFiles[Symbol.iterator]()
+      },
+    } as FileList
+
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      get: () => liveFileList,
+    })
+    Object.defineProperty(input, "value", {
+      configurable: true,
+      get: () => (selectedFiles.length ? "C:\\fakepath\\proof.png" : ""),
+      set: (value: string) => {
+        if (value === "") selectedFiles = []
+      },
+    })
+
+    fireEvent.change(input)
+
+    expect(await screen.findByText("proof.png")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "所选图片预览" })).toHaveAttribute(
+      "src",
+      "blob:proof-one"
+    )
+  })
+
   it("shows the selected filename, formatted size, and preview", async () => {
     const user = userEvent.setup()
     render(<ControlledImageField />)

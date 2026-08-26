@@ -55,10 +55,10 @@ export function SuggestionImageField({
   )
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const files = event.currentTarget.files
+    const files = Array.from(event.currentTarget.files ?? [])
     event.currentTarget.value = ""
 
-    if (!files || files.length === 0) return
+    if (files.length === 0) return
     if (files.length > 1) {
       setError("每条建议只能上传一张图片")
       return
