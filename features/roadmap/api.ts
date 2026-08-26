@@ -2,6 +2,7 @@ import {
   isRoadmapStatus,
   type Project,
   type RoadmapItem,
+  type RoadmapStatusHistoryEntry,
   type SuggestionInput,
   type VoteResult,
 } from "@/features/roadmap/types"
@@ -28,6 +29,14 @@ interface RoadmapItemRow {
   vote_count: string | number | null
   created_at: string
   updated_at: string
+}
+
+interface RoadmapStatusHistoryRow {
+  id: number
+  roadmap_item_id: string
+  from_status: string | null
+  to_status: string
+  changed_at: string
 }
 
 export function mapProjectRow(row: ProjectRow): Project {
@@ -64,6 +73,27 @@ export function mapRoadmapItemRow(row: RoadmapItemRow): RoadmapItem {
   }
 }
 
+export function mapRoadmapStatusHistoryRow(
+  row: RoadmapStatusHistoryRow,
+): RoadmapStatusHistoryEntry {
+  if (
+    !Number.isSafeInteger(row.id) ||
+    row.id < 1 ||
+    (row.from_status !== null && !isRoadmapStatus(row.from_status)) ||
+    !isRoadmapStatus(row.to_status)
+  ) {
+    throw new Error("Roadmap 状态历史无效")
+  }
+
+  return {
+    id: row.id,
+    roadmapItemId: row.roadmap_item_id,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    changedAt: row.changed_at,
+  }
+}
+
 export async function listProjects(): Promise<Project[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("projects")
@@ -94,6 +124,25 @@ export async function listRoadmapItems(
   }
 
   return ((data ?? []) as RoadmapItemRow[]).map(mapRoadmapItemRow)
+}
+
+export async function listRoadmapStatusHistory(
+  itemId: string,
+): Promise<RoadmapStatusHistoryEntry[]> {
+  const { data, error } = await getSupabaseBrowserClient()
+    .from("roadmap_status_history_public")
+    .select("id,roadmap_item_id,from_status,to_status,changed_at")
+    .eq("roadmap_item_id", itemId)
+    .order("changed_at", { ascending: true })
+    .order("id", { ascending: true })
+
+  if (error) {
+    throw new Error("状态时间轴加载失败，请稍后重试")
+  }
+
+  return ((data ?? []) as RoadmapStatusHistoryRow[]).map(
+    mapRoadmapStatusHistoryRow,
+  )
 }
 
 async function invokePublicFunction<T>(

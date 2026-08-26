@@ -32,6 +32,40 @@ export interface RoadmapItem {
   updatedAt: string
 }
 
+export interface RoadmapStatusHistoryEntry {
+  id: number
+  roadmapItemId: string
+  fromStatus: RoadmapStatus | null
+  toStatus: RoadmapStatus
+  changedAt: string
+}
+
+export type RoadmapTimelineEvent =
+  | {
+      key: string
+      kind: "created"
+      label: string
+      toStatus?: RoadmapStatus
+    }
+  | {
+      key: string
+      kind: "baseline"
+      label: string
+      toStatus: RoadmapStatus
+    }
+  | {
+      key: string
+      kind: "transition"
+      label: string
+      fromStatus: RoadmapStatus
+      toStatus: RoadmapStatus
+    }
+
+export interface RoadmapTimelineGroup {
+  date: string
+  events: RoadmapTimelineEvent[]
+}
+
 export interface SuggestionInput {
   projectId: string
   title: string

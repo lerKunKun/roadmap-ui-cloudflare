@@ -19,7 +19,7 @@
 - Keep public clients read-only for history; trigger writes and state updates must share one database transaction.
 - Fetch history when the dialog opens or retries; do not add Supabase Realtime, WebSocket, or polling.
 - Keep voting behavior and one-public-IP-per-item enforcement unchanged.
-- Do not restart or recreate the local `roadmap-cloud` Supabase Docker stack; database tests and migrations use the linked cloud project.
+- Do not restart or recreate the local `roadmap-cloud` Supabase Docker stack; database tests and migrations use the linked cloud project through the CLI-generated IPv4 Session Pooler URL.
 - Do not expose `.env.deploy.local`, passwords, database URLs, access tokens, or service keys in output or committed files.
 - Commit messages are Chinese. Push and deploy only after all checks pass.
 
@@ -28,7 +28,7 @@
 ## File Map
 
 - Create `supabase/migrations/20260825090000_roadmap_status_history.sql`: history table, trigger, backfill, view, RLS, grants.
-- Modify `supabase/tests/database/roadmap.test.sql`: pgTAP contract and transactional history behavior.
+- Create `supabase/tests/database/status-history.test.sql`: isolated pgTAP contract and transactional history behavior.
 - Modify `features/roadmap/types.ts`: public status-history and timeline view-model types.
 - Modify `features/roadmap/api.ts`: database row mapper and public history query.
 - Create `features/roadmap/timeline.ts`: China-date formatting, creation-node merge, grouping, labels.
@@ -48,11 +48,13 @@
 
 **Files:**
 - Create: `supabase/migrations/20260825090000_roadmap_status_history.sql`
-- Modify: `supabase/tests/database/roadmap.test.sql`
+- Create: `supabase/tests/database/status-history.test.sql`
 
 **Interfaces:**
 - Consumes: `public.roadmap_items`, its five-state constraint, `created_at`, `updated_at`, and the existing `roadmap_items_set_updated_at` trigger.
 - Produces: `public.roadmap_status_history`, `public.roadmap_status_history_public`, and `public.record_roadmap_status_history()`.
+
+**Execution correction (2026-08-26):** The linked cloud project contains legitimate CRUD changes, so the existing seed-order assertions in `roadmap.test.sql` are intentionally not run against production. The database task instead uses `status-history.test.sql` with `select plan(17)`, fixed UUID fixtures inside `begin`/`rollback`, and an invariant that every pre-existing item has a backfilled history row. Because the current Mihomo network terminates the direct IPv6 database endpoint, all remote pgTAP and migration commands use `supabase/.temp/pooler-url` with the password injected only in process memory. This correction supersedes the test-file placement and `--linked` examples below; the schema and behavior assertions remain unchanged.
 
 - [ ] **Step 1: Add failing pgTAP schema assertions**
 
@@ -165,7 +167,7 @@ select is(
 Load `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`, and `SUPABASE_DB_PASSWORD` from `.env.deploy.local` into process memory without printing values, then run:
 
 ```powershell
-npx supabase test db --linked
+npx supabase test db supabase/tests/database/status-history.test.sql --db-url $roadmapPoolerUrl
 ```
 
 Expected: FAIL because `roadmap_status_history` and its view/function/trigger do not exist. Do not start local Docker.
@@ -272,7 +274,7 @@ Expected dry run: exactly `20260825090000_roadmap_status_history.sql` is pending
 Run:
 
 ```powershell
-npx supabase test db --linked
+npx supabase test db supabase/tests/database/status-history.test.sql --db-url $roadmapPoolerUrl
 ```
 
 Expected: all planned assertions pass and the pgTAP transaction rolls back fixture writes.
@@ -294,7 +296,7 @@ Expected: `0`.
 - [ ] **Step 7: Commit the database contract**
 
 ```powershell
-git add supabase/migrations/20260825090000_roadmap_status_history.sql supabase/tests/database/roadmap.test.sql
+git add supabase/migrations/20260825090000_roadmap_status_history.sql supabase/tests/database/status-history.test.sql docs/superpowers/plans/2026-08-25-roadmap-detail-timeline.md
 git commit -m "功能：记录 Roadmap 状态历史"
 ```
 
@@ -468,13 +470,10 @@ export interface RoadmapStatusHistoryEntry {
   changedAt: string
 }
 
-export interface RoadmapTimelineEvent {
-  key: string
-  kind: "created" | "baseline" | "transition"
-  label: string
-  fromStatus?: RoadmapStatus
-  toStatus: RoadmapStatus
-}
+export type RoadmapTimelineEvent =
+  | { key: string; kind: "created"; label: string; toStatus?: RoadmapStatus }
+  | { key: string; kind: "baseline"; label: string; toStatus: RoadmapStatus }
+  | { key: string; kind: "transition"; label: string; fromStatus: RoadmapStatus; toStatus: RoadmapStatus }
 
 export interface RoadmapTimelineGroup {
   date: string
@@ -879,7 +878,7 @@ Load linked Supabase credentials from `.env.deploy.local` without printing them,
 
 ```powershell
 npx supabase db push --linked --dry-run --password $env:SUPABASE_DB_PASSWORD
-npx supabase test db --linked
+npx supabase test db supabase/tests/database/status-history.test.sql --db-url $roadmapPoolerUrl
 ```
 
 Expected: no pending migrations and all pgTAP tests pass.

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   mapProjectRow,
   mapRoadmapItemRow,
+  mapRoadmapStatusHistoryRow,
 } from "@/features/roadmap/api"
 
 describe("Roadmap API mapping", () => {
@@ -54,5 +55,35 @@ describe("Roadmap API mapping", () => {
         updated_at: "2026-08-24T09:00:00.000Z",
       }),
     ).toThrow("Roadmap 状态无效")
+  })
+
+  it("maps a status history row into the UI model", () => {
+    expect(
+      mapRoadmapStatusHistoryRow({
+        id: 7,
+        roadmap_item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        from_status: "approved",
+        to_status: "in_progress",
+        changed_at: "2026-08-24T16:30:00.000Z",
+      }),
+    ).toEqual({
+      id: 7,
+      roadmapItemId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      fromStatus: "approved",
+      toStatus: "in_progress",
+      changedAt: "2026-08-24T16:30:00.000Z",
+    })
+  })
+
+  it("refuses unknown database statuses in history", () => {
+    expect(() =>
+      mapRoadmapStatusHistoryRow({
+        id: 8,
+        roadmap_item_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        from_status: "approved",
+        to_status: "archived",
+        changed_at: "2026-08-24T16:30:00.000Z",
+      }),
+    ).toThrow("Roadmap 状态历史无效")
   })
 })
