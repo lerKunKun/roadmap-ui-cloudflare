@@ -10,6 +10,8 @@ import {
   createProject,
   createRoadmapItem,
   deleteProject,
+  deleteRoadmapItem,
+  getAdminRoadmapItemImage,
   moveRoadmapItem,
   updateRoadmapItem,
 } from "@/features/roadmap/admin-api"
@@ -173,6 +175,246 @@ describe("admin Roadmap API", () => {
     })
 
     expect(updated).toMatchObject({ hasImage: true, imageId: null })
+  })
+
+  it("图片元数据不存在时不签发预览地址", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+    const eq = vi.fn(() => ({ maybeSingle }))
+    const select = vi.fn(() => ({ eq }))
+    const createSignedUrl = vi.fn()
+    getSupabaseBrowserClient.mockReturnValue({
+      from: vi.fn(() => ({ select })),
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
+    })
+
+    await expect(getAdminRoadmapItemImage(itemId)).resolves.toBeNull()
+    expect(createSignedUrl).not.toHaveBeenCalled()
+  })
+
+  it("从私有存储桶签发 300 秒预览地址且不返回存储路径", async () => {
+    const storagePath = `suggestions/${itemId}/${imageId}.png`
+    const metadata = {
+      id: imageId,
+      roadmap_item_id: itemId,
+      storage_path: storagePath,
+      mime_type: "image/png",
+      size_bytes: 128,
+      width: 20,
+      height: 10,
+    }
+    const maybeSingle = vi
+      .fn()
+      .mockResolvedValue({ data: metadata, error: null })
+    const eq = vi.fn(() => ({ maybeSingle }))
+    const select = vi.fn(() => ({ eq }))
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: "https://storage.example.test/private-preview" },
+      error: null,
+    })
+    const storageFrom = vi.fn(() => ({ createSignedUrl }))
+    getSupabaseBrowserClient.mockReturnValue({
+      from: vi.fn(() => ({ select })),
+      storage: { from: storageFrom },
+    })
+
+    const preview = await getAdminRoadmapItemImage(itemId)
+
+    expect(storageFrom).toHaveBeenCalledWith("roadmap-images")
+    expect(createSignedUrl).toHaveBeenCalledWith(storagePath, 300)
+    expect(preview).toEqual({
+      id: imageId,
+      signedUrl: "https://storage.example.test/private-preview",
+      mimeType: "image/png",
+      sizeBytes: 128,
+      width: 20,
+      height: 10,
+    })
+    expect(preview).not.toHaveProperty("storagePath")
+    expect(preview).not.toHaveProperty("storage_path")
+  })
+
+  it("把签名失败映射为不含私有路径的稳定提示", async () => {
+    const storagePath = `suggestions/${itemId}/secret-name.png`
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: imageId,
+        roadmap_item_id: itemId,
+        storage_path: storagePath,
+        mime_type: "image/png",
+        size_bytes: 128,
+        width: 20,
+        height: 10,
+      },
+      error: null,
+    })
+    const eq = vi.fn(() => ({ maybeSingle }))
+    const select = vi.fn(() => ({ eq }))
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: `cannot sign ${storagePath}` },
+    })
+    getSupabaseBrowserClient.mockReturnValue({
+      from: vi.fn(() => ({ select })),
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
+    })
+
+    const request = getAdminRoadmapItemImage(itemId)
+
+    await expect(request).rejects.toThrow("建议图片加载失败，请重试")
+    await expect(request).rejects.not.toThrow(storagePath)
+  })
+
+  it("没有图片的条目直接删除数据库记录", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
+    const metadataEq = vi.fn(() => ({ maybeSingle }))
+    const metadataSelect = vi.fn(() => ({ eq: metadataEq }))
+    const itemEq = vi.fn().mockResolvedValue({ error: null })
+    const itemDelete = vi.fn(() => ({ eq: itemEq }))
+    const storageRemove = vi.fn()
+    const from = vi.fn((table: string) =>
+      table === "roadmap_item_images"
+        ? { select: metadataSelect }
+        : { delete: itemDelete }
+    )
+    getSupabaseBrowserClient.mockReturnValue({
+      from,
+      storage: { from: vi.fn(() => ({ remove: storageRemove })) },
+    })
+
+    await deleteRoadmapItem(itemId)
+
+    expect(storageRemove).not.toHaveBeenCalled()
+    expect(itemEq).toHaveBeenCalledWith("id", itemId)
+  })
+
+  it("先删除图片对象再删除条目记录", async () => {
+    const events: string[] = []
+    const storagePath = `suggestions/${itemId}/${imageId}.png`
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: imageId,
+        roadmap_item_id: itemId,
+        storage_path: storagePath,
+        mime_type: "image/png",
+        size_bytes: 128,
+        width: 20,
+        height: 10,
+      },
+      error: null,
+    })
+    const metadataEq = vi.fn(() => ({ maybeSingle }))
+    const metadataSelect = vi.fn(() => ({ eq: metadataEq }))
+    const itemEq = vi.fn().mockImplementation(async () => {
+      events.push("item-row")
+      return { error: null }
+    })
+    const itemDelete = vi.fn(() => ({ eq: itemEq }))
+    const storageRemove = vi.fn().mockImplementation(async () => {
+      events.push("storage-object")
+      return { data: [], error: null }
+    })
+    const from = vi.fn((table: string) =>
+      table === "roadmap_item_images"
+        ? { select: metadataSelect }
+        : { delete: itemDelete }
+    )
+    const storageFrom = vi.fn(() => ({ remove: storageRemove }))
+    getSupabaseBrowserClient.mockReturnValue({
+      from,
+      storage: { from: storageFrom },
+    })
+
+    await deleteRoadmapItem(itemId)
+
+    expect(storageFrom).toHaveBeenCalledWith("roadmap-images")
+    expect(storageRemove).toHaveBeenCalledWith([storagePath])
+    expect(events).toEqual(["storage-object", "item-row"])
+  })
+
+  it("图片对象明确不存在时仍删除条目记录", async () => {
+    const storagePath = `suggestions/${itemId}/${imageId}.png`
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: imageId,
+        roadmap_item_id: itemId,
+        storage_path: storagePath,
+        mime_type: "image/png",
+        size_bytes: 128,
+        width: 20,
+        height: 10,
+      },
+      error: null,
+    })
+    const metadataEq = vi.fn(() => ({ maybeSingle }))
+    const metadataSelect = vi.fn(() => ({ eq: metadataEq }))
+    const itemEq = vi.fn().mockResolvedValue({ error: null })
+    const itemDelete = vi.fn(() => ({ eq: itemEq }))
+    const storageRemove = vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: "NoSuchKey",
+        status: 404,
+        statusCode: "404",
+        message: "The resource was not found",
+      },
+    })
+    const from = vi.fn((table: string) =>
+      table === "roadmap_item_images"
+        ? { select: metadataSelect }
+        : { delete: itemDelete }
+    )
+    getSupabaseBrowserClient.mockReturnValue({
+      from,
+      storage: { from: vi.fn(() => ({ remove: storageRemove })) },
+    })
+
+    await deleteRoadmapItem(itemId)
+
+    expect(storageRemove).toHaveBeenCalledWith([storagePath])
+    expect(itemEq).toHaveBeenCalledWith("id", itemId)
+  })
+
+  it.each([
+    { code: "NoSuchBucket", status: 404, statusCode: "404" },
+    { code: "TenantNotFound", status: 404, statusCode: "404" },
+    { code: "not_found", status: 404, statusCode: "404" },
+    { status: 404, statusCode: "404" },
+    { code: "AccessDenied", status: 403, statusCode: "403" },
+  ])("图片删除失败 %o 时保留条目记录", async (storageError) => {
+    const storagePath = `suggestions/${itemId}/${imageId}.png`
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: imageId,
+        roadmap_item_id: itemId,
+        storage_path: storagePath,
+        mime_type: "image/png",
+        size_bytes: 128,
+        width: 20,
+        height: 10,
+      },
+      error: null,
+    })
+    const metadataEq = vi.fn(() => ({ maybeSingle }))
+    const metadataSelect = vi.fn(() => ({ eq: metadataEq }))
+    const itemDelete = vi.fn()
+    const storageRemove = vi.fn().mockResolvedValue({
+      data: null,
+      error: { ...storageError, message: "Storage failure" },
+    })
+    const from = vi.fn((table: string) =>
+      table === "roadmap_item_images"
+        ? { select: metadataSelect }
+        : { delete: itemDelete }
+    )
+    getSupabaseBrowserClient.mockReturnValue({
+      from,
+      storage: { from: vi.fn(() => ({ remove: storageRemove })) },
+    })
+
+    await expect(deleteRoadmapItem(itemId)).rejects.toThrow(
+      "建议图片删除失败，Roadmap 条目已保留"
+    )
+    expect(itemDelete).not.toHaveBeenCalled()
   })
 
   it("把有关联条目的项目删除错误翻译成可操作提示", async () => {

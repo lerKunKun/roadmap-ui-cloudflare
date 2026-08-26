@@ -24,6 +24,15 @@ export interface RoadmapItemInput {
   sortOrder: number
 }
 
+export interface AdminRoadmapImage {
+  id: string
+  signedUrl: string
+  mimeType: string
+  sizeBytes: number
+  width: number
+  height: number
+}
+
 interface AdminItemRow {
   id: string
   project_id: string
@@ -138,6 +147,30 @@ async function getAdminRoadmapImageMetadata(
   return data as AdminImageMetadataRow | null
 }
 
+export async function getAdminRoadmapItemImage(
+  itemId: string
+): Promise<AdminRoadmapImage | null> {
+  const image = await getAdminRoadmapImageMetadata(itemId)
+  if (!image) return null
+
+  const { data, error } = await getSupabaseBrowserClient()
+    .storage.from("roadmap-images")
+    .createSignedUrl(image.storage_path, 300)
+
+  if (error || !data?.signedUrl) {
+    throw new Error("建议图片加载失败，请重试")
+  }
+
+  return {
+    id: image.id,
+    signedUrl: data.signedUrl,
+    mimeType: image.mime_type,
+    sizeBytes: image.size_bytes,
+    width: image.width,
+    height: image.height,
+  }
+}
+
 async function hydrateAdminItem(row: AdminItemRow): Promise<RoadmapItem> {
   const item = mapAdminItem(row)
   const image = await getAdminRoadmapImageMetadata(item.id)
@@ -157,6 +190,15 @@ function mutationError(error: { code?: string; message?: string } | null, fallba
   }
   if (error.code === "23505") throw new Error("项目标识已存在")
   throw new Error(fallback)
+}
+
+function isStorageObjectNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "NoSuchKey"
+  )
 }
 
 export const listAdminProjects = listProjects
@@ -235,6 +277,24 @@ export async function updateRoadmapItem(
 }
 
 export async function deleteRoadmapItem(id: string): Promise<void> {
+  const image = await getAdminRoadmapImageMetadata(id)
+
+  if (image) {
+    let storageError: unknown
+    try {
+      const result = await getSupabaseBrowserClient()
+        .storage.from("roadmap-images")
+        .remove([image.storage_path])
+      storageError = result.error
+    } catch {
+      throw new Error("建议图片删除失败，Roadmap 条目已保留")
+    }
+
+    if (storageError && !isStorageObjectNotFound(storageError)) {
+      throw new Error("建议图片删除失败，Roadmap 条目已保留")
+    }
+  }
+
   const { error } = await getSupabaseBrowserClient()
     .from("roadmap_items")
     .delete()
