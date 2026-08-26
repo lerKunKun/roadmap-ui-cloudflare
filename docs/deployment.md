@@ -31,7 +31,7 @@ npx supabase link --project-ref $env:SUPABASE_PROJECT_REF
 npx supabase db push
 ```
 
-数据库迁移会创建 `projects`、`roadmap_items`、`votes`，并初始化以下分类：广告系统、ks-alert、模板工具、其他。
+数据库迁移会创建 `projects`、`roadmap_items`、`votes`、不可变状态历史及自动记录触发器，并初始化以下分类：广告系统、ks-alert、模板工具、其他。
 
 ### 2.2 创建管理员
 
@@ -163,12 +163,13 @@ roadmap-ui.pages.dev
 7. 匿名用户直接对 `projects` 或 `roadmap_items` 发起写请求会被 RLS 拒绝。
 8. 响应包含 CSP、`nosniff`、禁止嵌入、Referrer 与 Permissions Policy 安全头。
 9. 手机宽度下页面不整体横向溢出，看板内部可横向滚动。
+10. “查看详情”使用居中弹窗；状态时间轴精确到日，每次打开都会刷新，管理端变更状态后会自动新增历史记录。
 
 Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码或 Secret Key。
 
 ## 当前生产状态（2026-08-25）
 
-- Supabase migration：`20260824000000_roadmap.sql`
+- Supabase migrations：`20260824000000_roadmap.sql`、`20260825090000_roadmap_status_history.sql`
 - Edge Functions：`submit-suggestion`、`vote`
 - Cloudflare Pages：`https://roadmap-ui.pages.dev`
 - 用户端：`https://telljax.com`（Cloudflare Pages 状态 active）

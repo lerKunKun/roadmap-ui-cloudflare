@@ -1,6 +1,6 @@
 # Roadmap
 
-面向用户公开、管理员密码登录的多项目 Roadmap。每个项目拥有独立看板，支持匿名建议、按公网 IP 去重投票，以及项目和条目的完整管理。
+面向用户公开、管理员密码登录的多项目 Roadmap。每个项目拥有独立看板，支持匿名建议、按公网 IP 去重投票、自动状态时间轴，以及项目和条目的完整管理。
 
 ## 技术架构
 
@@ -57,5 +57,5 @@ npm run deploy:check
 - Pages：<https://roadmap-ui.pages.dev>
 - 用户端：<https://telljax.com>
 - 管理端：<https://admin.telljax.com>（根路径自动进入 `/admin/`）
-- Supabase migration：`20260824000000_roadmap.sql`
+- Supabase migrations：`20260824000000_roadmap.sql`、`20260825090000_roadmap_status_history.sql`
 - Edge Functions：`submit-suggestion`、`vote`
