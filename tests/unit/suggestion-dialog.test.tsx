@@ -199,6 +199,58 @@ describe("SuggestionDialog", () => {
     expect(screen.getByRole("button", { name: "确认提交" })).toBeEnabled()
   })
 
+  it("submits text only after removing an image during replacement validation", async () => {
+    const user = userEvent.setup()
+    const replacementValidation = deferredValue<ImageBitmap>()
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <SuggestionDialog
+        projects={projects}
+        selectedProjectId={projects[0].id}
+        onSubmit={onSubmit}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "提交建议" }))
+    await user.type(screen.getByLabelText("建议标题"), "增加通知")
+    await user.upload(
+      screen.getByLabelText("附加图片（可选）"),
+      imageFile("first.png")
+    )
+    await screen.findByText("first.png")
+    vi.mocked(createImageBitmap).mockReturnValueOnce(
+      replacementValidation.promise
+    )
+
+    const fileInput = screen.getByLabelText("附加图片（可选）")
+    const removeButton = screen.getByRole("button", { name: "移除图片" })
+    act(() => {
+      fireEvent.change(fileInput, {
+        target: { files: [imageFile("replacement.png")] },
+      })
+      fireEvent.click(removeButton)
+    })
+
+    const submitButton = screen.getByRole("button", { name: "确认提交" })
+    expect(submitButton).toBeEnabled()
+    await user.click(submitButton)
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ image: null })
+    )
+
+    await act(async () =>
+      replacementValidation.resolve({
+        width: 640,
+        height: 480,
+        close: vi.fn(),
+      } as ImageBitmap)
+    )
+    await user.click(screen.getByRole("button", { name: "提交建议" }))
+    expect(screen.queryByText("first.png")).not.toBeInTheDocument()
+    expect(screen.queryByText("replacement.png")).not.toBeInTheDocument()
+  })
+
   it("submits only once when two submit events arrive before rerender", async () => {
     const user = userEvent.setup()
     const request = deferred()

@@ -94,6 +94,8 @@ export function SuggestionImageField({
 
   function removeImage() {
     validationSequence.current += 1
+    setValidating(false)
+    onValidatingChange?.(false)
     setError(null)
     onChange(null)
   }
@@ -146,7 +148,7 @@ export function SuggestionImageField({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={actionsDisabled}
+                disabled={disabled}
                 onClick={removeImage}
               >
                 <Trash2 data-icon="inline-start" />
