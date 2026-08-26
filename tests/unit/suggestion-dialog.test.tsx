@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -33,6 +33,16 @@ function deferred() {
   let resolve!: () => void
   let reject!: (reason: unknown) => void
   const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function deferredValue<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
     reject = rejectPromise
   })
@@ -145,6 +155,75 @@ describe("SuggestionDialog", () => {
       screen.queryByRole("button", { name: "关闭" })
     ).not.toBeInTheDocument()
 
+    await act(async () => request.resolve())
+  })
+
+  it("keeps an in-flight image outside the submitted and reset form", async () => {
+    const user = userEvent.setup()
+    const validation = deferredValue<ImageBitmap>()
+    vi.mocked(createImageBitmap).mockReturnValueOnce(validation.promise)
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    render(
+      <SuggestionDialog
+        projects={projects}
+        selectedProjectId={projects[0].id}
+        onSubmit={onSubmit}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "提交建议" }))
+    await user.type(screen.getByLabelText("建议标题"), "增加通知")
+    const submitButton = screen.getByRole("button", { name: "确认提交" })
+    const form = submitButton.closest("form")
+    expect(form).not.toBeNull()
+
+    fireEvent.change(screen.getByLabelText("附加图片（可选）"), {
+      target: { files: [imageFile()] },
+    })
+
+    expect(submitButton).toBeDisabled()
+    fireEvent.submit(form as HTMLFormElement)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole("button", { name: "关闭" }))
+    await act(async () =>
+      validation.resolve({
+        width: 640,
+        height: 480,
+        close: vi.fn(),
+      } as ImageBitmap)
+    )
+
+    await user.click(screen.getByRole("button", { name: "提交建议" }))
+    expect(screen.queryByText("proof.png")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "确认提交" })).toBeEnabled()
+  })
+
+  it("submits only once when two submit events arrive before rerender", async () => {
+    const user = userEvent.setup()
+    const request = deferred()
+    const onSubmit = vi.fn().mockReturnValue(request.promise)
+    render(
+      <SuggestionDialog
+        projects={projects}
+        selectedProjectId={projects[0].id}
+        onSubmit={onSubmit}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "提交建议" }))
+    await user.type(screen.getByLabelText("建议标题"), "增加通知")
+    const form = screen
+      .getByRole("button", { name: "确认提交" })
+      .closest("form")
+    expect(form).not.toBeNull()
+
+    act(() => {
+      fireEvent.submit(form as HTMLFormElement)
+      fireEvent.submit(form as HTMLFormElement)
+    })
+
+    expect(onSubmit).toHaveBeenCalledOnce()
     await act(async () => request.resolve())
   })
 

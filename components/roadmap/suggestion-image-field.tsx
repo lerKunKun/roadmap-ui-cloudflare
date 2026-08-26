@@ -11,6 +11,7 @@ import { validateSelectedSuggestionImage } from "@/features/roadmap/suggestion-i
 interface SuggestionImageFieldProps {
   value: File | null
   onChange(file: File | null): void
+  onValidatingChange?(validating: boolean): void
   disabled?: boolean
 }
 
@@ -23,6 +24,7 @@ function formatByteSize(bytes: number): string {
 export function SuggestionImageField({
   value,
   onChange,
+  onValidatingChange,
   disabled = false,
 }: SuggestionImageFieldProps) {
   const inputId = useId()
@@ -66,6 +68,7 @@ export function SuggestionImageField({
     const request = validationSequence.current + 1
     validationSequence.current = request
     setValidating(true)
+    onValidatingChange?.(true)
     setError(null)
 
     try {
@@ -84,6 +87,7 @@ export function SuggestionImageField({
     } finally {
       if (validationSequence.current === request) {
         setValidating(false)
+        onValidatingChange?.(false)
       }
     }
   }

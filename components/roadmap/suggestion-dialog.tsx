@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useRef, useState, type FormEvent } from "react"
 import { Lightbulb, Plus } from "lucide-react"
 
 import { SuggestionImageField } from "@/components/roadmap/suggestion-image-field"
@@ -35,15 +35,25 @@ export function SuggestionDialog({
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [image, setImage] = useState<File | null>(null)
+  const [imageValidating, setImageValidating] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const imageValidatingRef = useRef(false)
+  const submittingRef = useRef(false)
 
   function resetForm() {
     setProjectId(selectedProjectId)
     setTitle("")
     setDescription("")
     setImage(null)
+    imageValidatingRef.current = false
+    setImageValidating(false)
     setError(null)
+  }
+
+  function handleImageValidatingChange(validating: boolean) {
+    imageValidatingRef.current = validating
+    setImageValidating(validating)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -62,6 +72,8 @@ export function SuggestionDialog({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
+    if (submittingRef.current || imageValidatingRef.current) return
+
     const cleanTitle = title.trim()
     const cleanDescription = description.trim()
 
@@ -70,6 +82,7 @@ export function SuggestionDialog({
       return
     }
 
+    submittingRef.current = true
     setPending(true)
     setError(null)
 
@@ -87,6 +100,7 @@ export function SuggestionDialog({
         submitError instanceof Error ? submitError.message : "建议提交失败"
       )
     } finally {
+      submittingRef.current = false
       setPending(false)
     }
   }
@@ -172,6 +186,7 @@ export function SuggestionDialog({
           <SuggestionImageField
             value={image}
             onChange={setImage}
+            onValidatingChange={handleImageValidatingChange}
             disabled={pending}
           />
 
@@ -182,7 +197,10 @@ export function SuggestionDialog({
           ) : null}
 
           <DialogFooter className="mt-1">
-            <Button type="submit" disabled={pending || !projectId}>
+            <Button
+              type="submit"
+              disabled={pending || imageValidating || !projectId}
+            >
               {pending ? "正在上传…" : "确认提交"}
             </Button>
           </DialogFooter>
