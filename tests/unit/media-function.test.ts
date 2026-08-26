@@ -217,6 +217,30 @@ describe("media Pages Function", () => {
     )
   })
 
+  it("strips Storage cookies and internal headers before returning or caching", async () => {
+    const { context, waitUntilPromises } = makeContext()
+    const originResponse = makeOriginResponse()
+    originResponse.headers.set("Set-Cookie", "storage-session=secret; Secure")
+    originResponse.headers.set("Sb-Request-Id", "private-upstream-request")
+    originResponse.headers.set("Cf-Ray", "private-upstream-ray")
+    const dependencies = makeDependencies({
+      downloadPrivateImage: vi.fn().mockResolvedValue(originResponse),
+    })
+
+    const response = await handleMediaRequest(context, dependencies)
+    await Promise.all(waitUntilPromises)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Set-Cookie")).toBeNull()
+    expect(response.headers.get("Sb-Request-Id")).toBeNull()
+    expect(response.headers.get("Cf-Ray")).toBeNull()
+
+    const storedResponse = vi.mocked(dependencies.cachePut).mock.calls[0][1]
+    expect(storedResponse.headers.get("Set-Cookie")).toBeNull()
+    expect(storedResponse.headers.get("Sb-Request-Id")).toBeNull()
+    expect(storedResponse.headers.get("Cf-Ray")).toBeNull()
+  })
+
   it("does not fail a valid response when the asynchronous cache write rejects", async () => {
     const { context, waitUntilPromises } = makeContext()
     const dependencies = makeDependencies({

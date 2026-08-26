@@ -175,11 +175,13 @@ export async function handleMediaRequest(
       return errorResponse(502, "图片服务暂不可用")
     }
 
-    const headers = new Headers(originResponse.headers)
-    headers.set("Cache-Control", SUCCESS_CACHE_CONTROL)
-    headers.set("X-Content-Type-Options", "nosniff")
-    headers.set("Content-Disposition", "inline")
-    headers.delete("X-Roadmap-Cache")
+    const headers = new Headers({
+      "Cache-Control": SUCCESS_CACHE_CONTROL,
+      "Content-Disposition": "inline",
+      "Content-Length": String(record.size_bytes),
+      "Content-Type": record.mime_type,
+      "X-Content-Type-Options": "nosniff",
+    })
 
     const cacheableResponse = new Response(originResponse.body, {
       status: 200,
