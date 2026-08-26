@@ -83,16 +83,13 @@ export function ItemDialog({
         const image = await getAdminRoadmapItemImage(itemId)
         if (previewRequestId.current !== requestId) return
         setPreview({ itemId, status: "loaded", image, error: null })
-      } catch (loadError) {
+      } catch {
         if (previewRequestId.current !== requestId) return
         setPreview({
           itemId,
           status: "error",
           image: null,
-          error:
-            loadError instanceof Error
-              ? loadError.message
-              : "建议图片加载失败，请重试",
+          error: "建议图片加载失败，请重试",
         })
       }
     })()

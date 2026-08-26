@@ -264,6 +264,35 @@ describe("admin Roadmap API", () => {
     await expect(request).rejects.not.toThrow(storagePath)
   })
 
+  it("把签名请求拒绝映射为不含私有路径的稳定提示", async () => {
+    const storagePath = `suggestions/${itemId}/rejected-secret-name.png`
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: imageId,
+        roadmap_item_id: itemId,
+        storage_path: storagePath,
+        mime_type: "image/png",
+        size_bytes: 128,
+        width: 20,
+        height: 10,
+      },
+      error: null,
+    })
+    const eq = vi.fn(() => ({ maybeSingle }))
+    const select = vi.fn(() => ({ eq }))
+    const createSignedUrl = vi
+      .fn()
+      .mockRejectedValue(new Error(`cannot sign ${storagePath}`))
+    getSupabaseBrowserClient.mockReturnValue({
+      from: vi.fn(() => ({ select })),
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
+    })
+
+    await expect(getAdminRoadmapItemImage(itemId)).rejects.toEqual(
+      new Error("建议图片加载失败，请重试")
+    )
+  })
+
   it("没有图片的条目直接删除数据库记录", async () => {
     const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null })
     const metadataEq = vi.fn(() => ({ maybeSingle }))

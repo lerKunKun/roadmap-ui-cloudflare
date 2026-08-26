@@ -108,7 +108,9 @@ describe("ItemDialog admin image preview", () => {
   it("预览加载失败后可重试且不妨碍编辑标题和阶段", async () => {
     const user = userEvent.setup()
     vi.mocked(getAdminRoadmapItemImage)
-      .mockRejectedValueOnce(new Error("建议图片加载失败，请重试"))
+      .mockRejectedValueOnce(
+        new Error("cannot sign suggestions/private/internal-name.png")
+      )
       .mockResolvedValueOnce(preview)
     renderDialog()
 

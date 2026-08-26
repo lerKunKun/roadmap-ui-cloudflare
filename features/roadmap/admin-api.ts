@@ -153,9 +153,16 @@ export async function getAdminRoadmapItemImage(
   const image = await getAdminRoadmapImageMetadata(itemId)
   if (!image) return null
 
-  const { data, error } = await getSupabaseBrowserClient()
-    .storage.from("roadmap-images")
-    .createSignedUrl(image.storage_path, 300)
+  let signedUrlResult
+  try {
+    signedUrlResult = await getSupabaseBrowserClient()
+      .storage.from("roadmap-images")
+      .createSignedUrl(image.storage_path, 300)
+  } catch {
+    throw new Error("建议图片加载失败，请重试")
+  }
+
+  const { data, error } = signedUrlResult
 
   if (error || !data?.signedUrl) {
     throw new Error("建议图片加载失败，请重试")
