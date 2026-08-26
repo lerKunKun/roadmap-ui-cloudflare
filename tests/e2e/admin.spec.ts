@@ -3,6 +3,14 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111"
 const CREATED_PROJECT_ID = "33333333-3333-4333-8333-333333333333"
 const CREATED_ITEM_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+const IMAGE_ITEM_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+const IMAGE_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+const IMAGE_STORAGE_PATH = `suggestions/${IMAGE_ITEM_ID}/${IMAGE_ID}.png`
+const SIGNED_IMAGE_PATH = `/object/sign/roadmap-images/${IMAGE_STORAGE_PATH}?token=e2e-preview-token`
+const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEElEQVQImWNgaPj/H4xhDABS0gn50Ke7SAAAAABJRU5ErkJggg==",
+  "base64"
+)
 const timestamp = "2026-08-24T08:00:00.000Z"
 
 function encode(value: unknown) {
@@ -21,11 +29,39 @@ async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
 
-async function installAdminApi(page: Page) {
+async function installAdminApi(
+  page: Page,
+  options: { imageItem?: boolean; storageDeleteFails?: boolean } = {}
+) {
   const projects = [
     { id: PROJECT_ID, name: "广告系统", slug: "advertising-system", project_url: null, sort_order: 0 },
   ]
-  const items: Array<Record<string, unknown>> = []
+  const items: Array<Record<string, unknown>> = options.imageItem
+    ? [
+        {
+          id: IMAGE_ITEM_ID,
+          project_id: PROJECT_ID,
+          title: "待审核截图建议",
+          description: "管理员需要查看签名预览后再调整阶段",
+          status: "pending",
+          sort_order: 0,
+          created_at: timestamp,
+          updated_at: timestamp,
+        },
+      ]
+    : []
+  const events: string[] = []
+  const imageMetadata = options.imageItem
+    ? {
+        id: IMAGE_ID,
+        roadmap_item_id: IMAGE_ITEM_ID,
+        storage_path: IMAGE_STORAGE_PATH,
+        mime_type: "image/png",
+        size_bytes: PNG_BYTES.length,
+        width: 2,
+        height: 2,
+      }
+    : null
 
   await page.route("https://e2e.supabase.co/auth/v1/token**", async (route) => {
     const body = route.request().postDataJSON() as { password: string }
@@ -81,8 +117,63 @@ async function installAdminApi(page: Page) {
 
   await page.route("https://e2e.supabase.co/rest/v1/roadmap_items_public**", async (route) => {
     const projectId = new URL(route.request().url()).searchParams.get("project_id")?.replace("eq.", "")
-    await json(route, items.filter((entry) => entry.project_id === projectId).map((entry) => ({ ...entry, vote_count: 0 })))
+    await json(route, items.filter((entry) => entry.project_id === projectId).map((entry) => ({
+      ...entry,
+      vote_count: 0,
+      has_image: imageMetadata?.roadmap_item_id === entry.id,
+      image_id:
+        imageMetadata &&
+        imageMetadata.roadmap_item_id === entry.id &&
+        entry.status !== "pending" &&
+        entry.status !== "rejected"
+          ? imageMetadata.id
+          : null,
+    })))
   })
+
+  await page.route("https://e2e.supabase.co/rest/v1/roadmap_item_images**", async (route) => {
+    const itemId = new URL(route.request().url()).searchParams
+      .get("roadmap_item_id")
+      ?.replace("eq.", "")
+    await json(
+      route,
+      imageMetadata && imageMetadata.roadmap_item_id === itemId
+        ? [imageMetadata]
+        : []
+    )
+  })
+
+  await page.route(
+    "https://e2e.supabase.co/storage/v1/object/sign/roadmap-images/**",
+    async (route) => {
+      if (route.request().method() === "POST") {
+        expect(route.request().postDataJSON()).toEqual({ expiresIn: 300 })
+        await json(route, { signedURL: SIGNED_IMAGE_PATH })
+        return
+      }
+      await route.fulfill({ contentType: "image/png", body: PNG_BYTES })
+    }
+  )
+
+  await page.route(
+    "https://e2e.supabase.co/storage/v1/object/roadmap-images",
+    async (route) => {
+      expect(route.request().method()).toBe("DELETE")
+      expect(route.request().postDataJSON()).toEqual({
+        prefixes: [IMAGE_STORAGE_PATH],
+      })
+      events.push("storage-delete")
+      if (options.storageDeleteFails) {
+        await json(
+          route,
+          { code: "AccessDenied", message: "fixture storage failure" },
+          500
+        )
+        return
+      }
+      await json(route, [])
+    }
+  )
 
   await page.route("https://e2e.supabase.co/rest/v1/rpc/move_roadmap_item", async (route) => {
     const payload = route.request().postDataJSON() as {
@@ -130,12 +221,22 @@ async function installAdminApi(page: Page) {
       return wantsRepresentation ? json(route, entry) : route.fulfill({ status: 204 })
     }
     if (method === "DELETE") {
+      events.push("item-delete")
       const index = items.findIndex((entry) => entry.id === id)
       if (index >= 0) items.splice(index, 1)
       return route.fulfill({ status: 204 })
     }
     return json(route, [])
   })
+
+  return { events }
+}
+
+async function login(page: Page) {
+  await page.goto("/admin/")
+  await page.getByLabel("管理密码").fill("Correct-admin-password-2026!")
+  await page.getByRole("button", { name: "进入管理端" }).click()
+  await expect(page.getByRole("heading", { name: "路线图管理" })).toBeVisible()
 }
 
 test("管理端仅需密码并完成项目与条目 CRUD", async ({ page }) => {
@@ -185,4 +286,65 @@ test("管理端仅需密码并完成项目与条目 CRUD", async ({ page }) => {
 
   await page.getByRole("button", { name: "退出管理端" }).click()
   await expect(page.getByRole("heading", { name: "管理端登录" })).toBeVisible()
+})
+
+test("管理端签名预览不阻塞阶段调整且先删 Storage 再删条目", async ({
+  page,
+}) => {
+  const fixture = await installAdminApi(page, { imageItem: true })
+  await page.emulateMedia({ colorScheme: "dark" })
+  await login(page)
+
+  await page.getByRole("button", { name: "编辑“待审核截图建议”" }).click()
+  const dialog = page.getByRole("dialog")
+  const preview = dialog.getByRole("img", {
+    name: "待审核建议图片：待审核截图建议",
+  })
+  await expect(preview).toBeVisible()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const dialogMetrics = await dialog.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }))
+  expect(dialogMetrics.scrollWidth).toBeLessThanOrEqual(dialogMetrics.clientWidth)
+  const dialogBackground = await dialog.evaluate(
+    (element) => getComputedStyle(element).backgroundColor
+  )
+  expect(dialogBackground).not.toBe("rgba(0, 0, 0, 0)")
+
+  await dialog.getByLabel("当前阶段").selectOption("approved")
+  await dialog.getByRole("button", { name: "保存条目" }).click()
+  await expect(
+    page
+      .getByRole("region", { name: "已批准" })
+      .getByRole("heading", { name: "待审核截图建议" })
+  ).toBeVisible()
+
+  page.once("dialog", (confirmation) => confirmation.accept())
+  await page.getByRole("button", { name: "删除“待审核截图建议”" }).click()
+  await expect(
+    page.getByRole("heading", { name: "待审核截图建议" })
+  ).toHaveCount(0)
+  expect(fixture.events).toEqual(["storage-delete", "item-delete"])
+})
+
+test("Storage 删除失败时保留含图条目并显示稳定提示", async ({ page }) => {
+  const fixture = await installAdminApi(page, {
+    imageItem: true,
+    storageDeleteFails: true,
+  })
+  await login(page)
+
+  page.once("dialog", (confirmation) => confirmation.accept())
+  await page.getByRole("button", { name: "删除“待审核截图建议”" }).click()
+  await expect(
+    page.getByRole("alert").filter({
+      hasText: "建议图片删除失败，Roadmap 条目已保留",
+    })
+  ).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "待审核截图建议" })
+  ).toBeVisible()
+  expect(fixture.events).toEqual(["storage-delete"])
 })

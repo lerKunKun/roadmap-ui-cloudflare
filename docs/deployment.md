@@ -31,9 +31,21 @@ npx supabase link --project-ref $env:SUPABASE_PROJECT_REF
 npx supabase db push
 ```
 
-数据库迁移会创建 `projects`、`roadmap_items`、`votes`、不可变状态历史及自动记录触发器，并初始化以下分类：广告系统、ks-alert、模板工具、其他。
+数据库迁移会创建 `projects`、`roadmap_items`、`votes`、不可变状态历史、建议图片元数据与容量计量，并初始化以下分类：广告系统、ks-alert、模板工具、其他。
 
-### 2.2 创建管理员
+### 2.2 建议图片存储与应用限制
+
+迁移创建私有 Storage Bucket `roadmap-images`；`public` 必须保持为 `false`，浏览器不能通过公开 Storage URL 读取对象。应用、数据库约束与媒体代理共同执行以下边界：
+
+- 每条建议最多一张图片，仅接受文件名扩展名与 MIME 同时匹配的 JPEG 或 PNG。
+- 图片必须大于 0 字节且严格小于 `5,000,000` 字节；Bucket 的 `file_size_limit` 为 `5,000,000`，应用层仍以严格小于为准。
+- 宽、高各为 1–12,000 像素，总像素不超过 40,000,000。
+- 同一公网 IP 的不可逆 HMAC 标识在滚动 24 小时内最多消费 3 次图片提交额度；后续上传失败也不返还额度。纯文字建议不消费图片额度，也不调用 Storage。
+- `roadmap_image_storage_usage` 按元数据原子预留和释放容量，逻辑上限为 `900,000,000` 字节（十进制 900 MB）。删除含图条目时必须先删除 Storage 对象，再删除条目并由级联触发器恢复用量。
+
+不要把 Bucket 改为公开，也不要绕过 `submit-suggestion` Edge Function 直接写入元数据或对象。
+
+### 2.3 创建管理员
 
 先生成随机强密码：
 
@@ -55,7 +67,7 @@ Authentication 设置要求：
 
 管理员邮箱同时写入数据库 RLS 规则；如需修改邮箱，必须同步新增迁移，不能只改 Cloudflare 环境变量。
 
-### 2.3 部署函数和私密变量
+### 2.4 部署函数和私密变量
 
 先准备允许调用匿名 Edge Functions 的公开端 Origin，不带末尾斜杠；多个来源使用英文逗号分隔。`VOTE_IP_SALT` 应是独立随机值，不能与管理员密码相同：
 
@@ -71,7 +83,7 @@ npx supabase functions deploy vote --use-api --import-map supabase/functions/den
 
 `--import-map` 必须显式传入，否则服务端打包不会解析项目级 `deno.json` 中的 npm 导入别名。
 
-内置的 Supabase Secret Key 由平台注入 Edge Functions，不需要复制到本地或 Cloudflare。两个函数虽然允许匿名调用，但会校验 Publishable Key 和精确 Origin；投票函数只保存客户端 IP 的加盐 HMAC，不保存明文 IP。匿名建议同样使用独立上下文的 HMAC-IP 做基础防刷，每个公网 IP 每小时最多提交 10 条。
+内置的 Supabase Secret Key 由平台注入 Edge Functions，不需要为 Edge Functions 手工复制；Cloudflare Pages Function 是独立运行时，仍须按 3.1 节配置其加密 `SUPABASE_SECRET_KEY`。两个 Edge Functions 虽然允许匿名调用，但会校验 Publishable Key 和精确 Origin；投票函数只保存客户端 IP 的加盐 HMAC，不保存明文 IP。匿名建议同样使用独立上下文的 HMAC-IP 做基础防刷，每个公网 IP 每小时最多提交 10 条。
 
 `VOTE_IP_SALT` 必须长期稳定保存在 Function Secrets。更换它会让历史投票无法继续匹配同一 IP，相当于重置防重复基准；建议限流的新时间窗口也会从新哈希重新开始。
 
@@ -101,7 +113,29 @@ NEXT_PUBLIC_ADMIN_EMAIL=roadmap-admin@internal.invalid
 NODE_VERSION=22
 ```
 
-Publishable Key 可以放在浏览器环境；权限边界由 RLS 和 Edge Functions 控制。不要把 Secret Key 或 Service Role Key 放进 Cloudflare Pages。
+这些 `NEXT_PUBLIC_*` 值只供静态前端构建；Publishable Key 可以进入浏览器包，权限边界由 RLS 和 Edge Functions 控制。
+
+Pages Function `/media/*` 还要求在 Production 和 Preview 两个环境分别配置以下运行时值：
+
+| 变量 | Cloudflare 类型 | 用途 |
+| --- | --- | --- |
+| `SUPABASE_URL` | Text | 服务端查询图片公开元数据与读取 Storage 的项目 URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Text | 服务端查询 `roadmap_item_images_public` |
+| `SUPABASE_SECRET_KEY` | Secret（加密） | 服务端读取私有 `roadmap-images` 对象 |
+
+`SUPABASE_SECRET_KEY` 仅允许存在于 Pages Function 的服务端运行时，必须使用 Cloudflare 加密 Secret；绝不能命名为 `NEXT_PUBLIC_SUPABASE_SECRET_KEY`、写入 `NEXT_PUBLIC_*`、提交到 Git、出现在构建日志或浏览器包中。不要在文档、命令历史或聊天中粘贴实际值。
+
+仓库的 `public/_routes.json` 必须保持：
+
+```json
+{
+  "version": 1,
+  "include": ["/media/*"],
+  "exclude": []
+}
+```
+
+这样只有 `/media/*` 消耗 Pages Function 请求；`/`、`/admin/` 和其他静态资源继续由 Pages 静态层直接响应。每次构建后都检查导出的 `out/_routes.json` 与上述内容一致。
 
 ### 3.2 域名与 DNS
 
@@ -150,6 +184,17 @@ roadmap-ui.pages.dev
 
 该规则只处理 `admin.telljax.com/`，不会改变 `telljax.com/` 或 `admin.telljax.com/admin/`。管理端仍复用同一份静态前端、Supabase 项目和管理员账号。
 
+### 3.4 图片功能上线顺序
+
+图片功能按以下顺序发布，不能颠倒：
+
+1. **数据库**：先执行 additive migration，确认私有 Bucket、表、视图、RLS、容量触发器和滚动额度 RPC 已存在。
+2. **Edge Function**：再部署兼容 JSON 纯文字请求与 multipart 图片请求的 `submit-suggestion`；先做一条经过允许 Origin 的纯文字 smoke，确认旧客户端仍可用。
+3. **Cloudflare 运行时**：在 Production 与 Preview 同时配置 `SUPABASE_URL`、`SUPABASE_PUBLISHABLE_KEY` 和加密的 `SUPABASE_SECRET_KEY`，只检查变量是否存在，不打印值。
+4. **Pages**：最后构建并部署静态输出与 `/media/*` Function，确认部署产物的 `_routes.json` 只包含 `/media/*`。
+
+在数据库、Edge Function 和 Pages 全部完成前，不进行真实用户图片 smoke；发布期间纯文字 JSON 路径保持兼容。
+
 ## 4. 上线验收
 
 逐项检查：
@@ -165,11 +210,20 @@ roadmap-ui.pages.dev
 9. 手机宽度下页面不整体横向溢出，看板内部可横向滚动。
 10. “查看详情”使用居中弹窗；状态时间轴精确到日，每次打开都会刷新，管理端变更状态后会自动新增历史记录。
 
+图片功能再执行一组可清理的 smoke，使用生成的小 PNG，不使用客户截图，并记录测试前的图片元数据数量与逻辑用量：
+
+1. 提交含图建议后，公开待处理行只返回 `has_image = true`、`image_id = null`；详情显示审核提示，且不会请求 `/media/*`。猜测对象路径或直接访问 Storage URL 均不能读取私有对象。
+2. 管理端通过短时签名 URL 看见待审核预览，并可正常调整状态。
+3. 批准后重新查询公开列表获得 `image_id`，公开详情通过 `/media/{imageId}` 显示图片。
+4. 第一次媒体响应的 `CF-Cache-Status` 为 `MISS`，第二次为 `HIT`；两次都具备约定的缓存与安全响应头。确认 HIT 不新增 Supabase 图片视图查询或 Storage 读取。
+5. 通过产品流程删除含图测试条目，确认先删除 Storage 对象，再删除条目，元数据数量与 `roadmap_image_storage_usage.used_bytes` 恢复到测试前值。
+6. 另建一条纯文字建议并删除，确认整个流程没有任何 Storage 请求。
+
 Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码或 Secret Key。
 
-## 当前生产状态（2026-08-25）
+## 当前生产状态（2026-08-26）
 
-- Supabase migrations：`20260824000000_roadmap.sql`、`20260825090000_roadmap_status_history.sql`
+- Supabase migrations：`20260824000000_roadmap.sql`、`20260825090000_roadmap_status_history.sql`、`20260826090000_roadmap_suggestion_images.sql`
 - Edge Functions：`submit-suggestion`、`vote`
 - Cloudflare Pages：`https://roadmap-ui.pages.dev`
 - 用户端：`https://telljax.com`（Cloudflare Pages 状态 active）
@@ -179,6 +233,7 @@ Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码
 
 - 前端异常：Cloudflare Pages → Deployments 选择上一个正常版本并回滚。
 - 函数异常：重新部署上一个 Git 提交中的函数目录。
-- 数据库迁移：生产迁移只向前执行；需要回退时先备份，再编写显式逆向迁移，不要直接重置生产数据库。
+- 图片功能回滚边界：可以安全回滚到上一版 Pages 部署，并重新部署上一版 Edge Function 代码，因为服务端仍支持原有 JSON 纯文字请求；additive 图片数据库迁移保持原位，不随代码回滚，也不要重置或手工删除生产表与 Bucket。
+- 数据库迁移：生产迁移只向前执行；确需移除数据结构时先备份，再编写并单独审核显式逆向迁移，不要直接重置生产数据库。
 - Supabase Free 项目低活跃约一周可能被自动暂停；收到预警后访问 Dashboard 或让应用产生正常数据库请求。暂停后可在 Dashboard 点击 Resume project，官方当前说明恢复窗口最长为一年。
 - 当前 Free Plan 包含两个活跃免费项目及一定的数据库、流量和 Edge Function 调用额度；超额或需要避免休眠时再升级，不需要购买钉钉 API。
