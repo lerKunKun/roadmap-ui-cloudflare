@@ -8,6 +8,12 @@ export const suggestionSchema = z
   })
   .strict()
 
+export type NormalizedSuggestion = z.infer<typeof suggestionSchema>
+
+export function parseSuggestionFields(input: unknown): NormalizedSuggestion {
+  return suggestionSchema.parse(input)
+}
+
 export const voteSchema = z
   .object({
     roadmapItemId: z.uuid(),

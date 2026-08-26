@@ -1,10 +1,12 @@
 import { randomBytes } from "node:crypto"
 import { createRequire } from "node:module"
-import { execFileSync, spawn } from "node:child_process"
+import { execFileSync } from "node:child_process"
 import { dirname, join } from "node:path"
 
-const API_URL = "http://127.0.0.1:54321"
-const ALLOWED_ORIGIN = "http://localhost:3000"
+const LOCAL_API_URL = "http://127.0.0.1:54321"
+const ALLOWED_ORIGIN = process.env.SUPABASE_FUNCTIONS_TEST_ORIGIN ?? "http://localhost:3000"
+const explicitTestBaseUrl = process.env.SUPABASE_FUNCTIONS_TEST_BASE_URL?.replace(/\/+$/, "")
+const functionsBaseUrl = explicitTestBaseUrl ?? `${LOCAL_API_URL}/functions/v1`
 const require = createRequire(import.meta.url)
 const supabaseCommand = process.platform === "win32"
   ? join(
@@ -39,34 +41,13 @@ function parseStatusEnvironment() {
   )
 }
 
-async function waitForRuntime(child) {
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error("Edge Functions 本地运行时启动超时")),
-      60_000,
-    )
-    const inspect = (chunk) => {
-      if (String(chunk).includes("Serving functions on")) {
-        clearTimeout(timeout)
-        resolve()
-      }
-    }
-    child.stdout.on("data", inspect)
-    child.stderr.on("data", inspect)
-    child.once("exit", (code) => {
-      clearTimeout(timeout)
-      reject(new Error(`Edge Functions 本地运行时提前退出：${code}`))
-    })
-  })
-}
-
 async function postFunction(name, body, options = {}) {
   const headers = { "Content-Type": "application/json" }
   if (options.key !== false) headers.apikey = options.publishableKey
   if (options.origin !== false) headers.Origin = options.origin ?? ALLOWED_ORIGIN
   if (options.ip) headers["cf-connecting-ip"] = options.ip
 
-  const response = await fetch(`${API_URL}/functions/v1/${name}`, {
+  const response = await fetch(`${functionsBaseUrl}/${name}`, {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -75,29 +56,63 @@ async function postFunction(name, body, options = {}) {
   return { status: response.status, payload }
 }
 
+async function postMultipartSuggestion(body, options = {}) {
+  const headers = {}
+  if (options.key !== false) headers.apikey = options.publishableKey
+  if (options.origin !== false) headers.Origin = options.origin ?? ALLOWED_ORIGIN
+  if (options.ip) headers["cf-connecting-ip"] = options.ip
+
+  const formData = new FormData()
+  formData.set("projectId", body.projectId)
+  formData.set("title", body.title)
+  formData.set("description", body.description)
+  if (body.image) formData.set("image", body.image)
+
+  const response = await fetch(`${functionsBaseUrl}/submit-suggestion`, {
+    method: "POST",
+    headers,
+    body: formData,
+  })
+  const payload = await response.json().catch(() => null)
+  return { status: response.status, payload }
+}
+
+function validPngFile(width, height) {
+  const bytes = new Uint8Array(33)
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10])
+  const view = new DataView(bytes.buffer)
+  view.setUint32(8, 13)
+  bytes.set([73, 72, 68, 82], 12)
+  view.setUint32(16, width)
+  view.setUint32(20, height)
+  bytes.set([8, 2, 0, 0, 0], 24)
+  return new File([bytes], "generated-proof.png", { type: "image/png" })
+}
+
 async function main() {
-  const env = parseStatusEnvironment()
-  const publishableKey = env.PUBLISHABLE_KEY || env.ANON_KEY
-  assert(publishableKey, "未找到本地 Supabase Publishable Key")
+  let publishableKey
+  let projectId
 
-  const runtime = spawn(
-    supabaseCommand,
-    [...supabaseArgs, "functions", "serve", "--env-file", "supabase/.env.local"],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  )
-
-  try {
-    await waitForRuntime(runtime)
+  if (explicitTestBaseUrl) {
+    publishableKey = process.env.SUPABASE_FUNCTIONS_TEST_PUBLISHABLE_KEY
+    projectId = process.env.SUPABASE_FUNCTIONS_TEST_PROJECT_ID
+    assert(publishableKey, "显式测试地址需要 SUPABASE_FUNCTIONS_TEST_PUBLISHABLE_KEY")
+    assert(projectId, "显式测试地址需要 SUPABASE_FUNCTIONS_TEST_PROJECT_ID")
+  } else {
+    const env = parseStatusEnvironment()
+    publishableKey = env.PUBLISHABLE_KEY || env.ANON_KEY
+    assert(publishableKey, "未找到本地 Supabase Publishable Key")
 
     const projectResponse = await fetch(
-      `${API_URL}/rest/v1/projects?select=id&slug=eq.advertising-system&limit=1`,
+      `${LOCAL_API_URL}/rest/v1/projects?select=id&slug=eq.advertising-system&limit=1`,
       { headers: { apikey: publishableKey } },
     )
     const projects = await projectResponse.json()
-    const projectId = projects[0]?.id
+    projectId = projects[0]?.id
     assert(projectId, "未找到数据库初始项目，请先执行 supabase db reset")
+  }
 
-    const fixture = { projectId, title: "函数黑盒验收", description: "本地自动化测试" }
+  const fixture = { projectId, title: "函数黑盒验收", description: "本地自动化测试" }
     const noKey = await postFunction("submit-suggestion", fixture, {
       key: false,
       origin: ALLOWED_ORIGIN,
@@ -179,14 +194,45 @@ async function main() {
     })
     assert(voteWithoutIp.status === 400, `投票缺少可信 IP 应返回 400，实际 ${voteWithoutIp.status}`)
 
-    process.stdout.write("Edge Function HTTP integration: 20 checks passed\n")
-  } finally {
-    if (runtime.exitCode === null && runtime.signalCode === null) {
-      const exited = new Promise((resolve) => runtime.once("exit", resolve))
-      runtime.kill()
-      await exited
+    let imageChecks = 0
+    if (process.env.SUPABASE_FUNCTIONS_TEST_IMAGES === "1") {
+      const validImage = await postMultipartSuggestion(
+        {
+          ...fixture,
+          title: `函数图片验收 ${randomSuffix}`,
+          image: validPngFile(2, 2),
+        },
+        {
+          publishableKey,
+          origin: ALLOWED_ORIGIN,
+          ip: `2001:db8:3::${randomSuffix.slice(0, 4)}`,
+        },
+      )
+      assert(validImage.status === 201, `合法 PNG 应成功，实际 ${validImage.status}`)
+
+      const exactSizeImage = await postMultipartSuggestion(
+        {
+          ...fixture,
+          title: `函数图片边界验收 ${randomSuffix}`,
+          image: new File([new Uint8Array(5_000_000)], "exact.png", {
+            type: "image/png",
+          }),
+        },
+        {
+          publishableKey,
+          origin: ALLOWED_ORIGIN,
+          ip: `2001:db8:4::${randomSuffix.slice(0, 4)}`,
+        },
+      )
+      assert(
+        exactSizeImage.status === 400 &&
+          exactSizeImage.payload?.message === "图片必须严格小于 5MB",
+        `5,000,000 字节图片应被拒绝，实际 ${exactSizeImage.status}`,
+      )
+      imageChecks = 2
     }
-  }
+
+  process.stdout.write(`Edge Function HTTP integration: ${20 + imageChecks} checks passed\n`)
 }
 
 await main()
