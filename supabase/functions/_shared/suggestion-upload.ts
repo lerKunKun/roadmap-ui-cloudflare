@@ -96,29 +96,32 @@ export async function submitSuggestionWithOptionalImage(
   }
 
   const itemId = await repository.createItem(suggestion)
-  const imageId = crypto.randomUUID()
-  const storagePath = `suggestions/${itemId}/${imageId}.${image.extension}`
+  let storagePath: string | null = null
   let uploadAttempted = false
 
   try {
+    const imageId = crypto.randomUUID()
+    const path = `suggestions/${itemId}/${imageId}.${image.extension}`
+    storagePath = path
     await repository.createImageMetadata({
       imageId,
       itemId,
-      storagePath,
+      storagePath: path,
       mimeType: image.mimeType,
       sizeBytes: image.sizeBytes,
       width: image.width,
       height: image.height,
     })
     uploadAttempted = true
-    await repository.uploadImage(storagePath, image.bytes, image.mimeType)
+    await repository.uploadImage(path, image.bytes, image.mimeType)
     return itemId
   } catch (error) {
     const publicFailure = publicImageFailure(error)
     const cleanup: Promise<unknown>[] = []
-    if (uploadAttempted) {
+    if (uploadAttempted && storagePath) {
+      const pathToRemove = storagePath
       cleanup.push(
-        Promise.resolve().then(() => repository.removeImage(storagePath))
+        Promise.resolve().then(() => repository.removeImage(pathToRemove))
       )
     }
     cleanup.push(Promise.resolve().then(() => repository.removeItem(itemId)))

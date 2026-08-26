@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { ValidatedSuggestionImage } from "../../supabase/functions/_shared/suggestion-image"
 import {
@@ -31,6 +31,8 @@ const pngImage: ValidatedSuggestionImage = {
   width: 2,
   height: 2,
 }
+
+afterEach(() => vi.restoreAllMocks())
 
 interface RepositoryOptions {
   quotaAvailable?: boolean
@@ -175,6 +177,25 @@ describe("submitSuggestionWithOptionalImage", () => {
       "consumeImageQuota:image-hash",
       "createItem",
       "createImageMetadata",
+      "removeItem:22222222-2222-4222-8222-222222222222",
+    ])
+  })
+
+  it("removes the created item when image UUID generation fails", async () => {
+    const { repository, events } = createRepository()
+    vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+      throw new Error("uuid unavailable")
+    })
+
+    await expect(
+      submitSuggestionWithOptionalImage(
+        { suggestion, image: jpegImage, imageIpHash: "image-hash" },
+        repository
+      )
+    ).rejects.toThrow("建议图片上传失败，请稍后重试")
+    expect(events).toEqual([
+      "consumeImageQuota:image-hash",
+      "createItem",
       "removeItem:22222222-2222-4222-8222-222222222222",
     ])
   })
