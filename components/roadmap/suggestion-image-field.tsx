@@ -4,7 +4,6 @@ import { useEffect, useId, useRef, useState, type ChangeEvent } from "react"
 import { ImagePlus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { validateSelectedSuggestionImage } from "@/features/roadmap/suggestion-image"
 
@@ -106,7 +105,7 @@ export function SuggestionImageField({
     <div className="grid gap-1.5">
       <Label htmlFor={inputId}>附加图片（可选）</Label>
       <div className="rounded-lg border border-dashed border-input bg-muted/30 p-3">
-        <Input
+        <input
           ref={inputRef}
           id={inputId}
           type="file"
@@ -117,7 +116,7 @@ export function SuggestionImageField({
         />
 
         {value ? (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-background">
               {/* A local blob URL cannot benefit from Next image optimization. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
