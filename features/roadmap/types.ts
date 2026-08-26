@@ -70,6 +70,7 @@ export interface SuggestionInput {
   projectId: string
   title: string
   description: string
+  image: File | null
 }
 
 export interface VoteResult {

@@ -94,8 +94,9 @@ describe("useRoadmap", () => {
           projectId: project.id,
           title: "增加通知",
           description: "支持邮件通知",
-        }),
-      ),
+          image: null,
+        })
+      )
     ).resolves.toBeUndefined()
 
     expect(result.current.notice).toBe("建议已提交，但列表刷新失败")
@@ -109,7 +110,9 @@ describe("useRoadmap", () => {
 
     await waitFor(() => expect(result.current.error).toBe("项目列表加载失败"))
     await act(() => result.current.reload())
-    await waitFor(() => expect(result.current.selectedProject?.id).toBe(project.id))
+    await waitFor(() =>
+      expect(result.current.selectedProject?.id).toBe(project.id)
+    )
 
     expect(listProjects).toHaveBeenCalledTimes(2)
   })

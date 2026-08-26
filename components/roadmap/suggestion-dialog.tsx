@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react"
 import { Lightbulb, Plus } from "lucide-react"
 
+import { SuggestionImageField } from "@/components/roadmap/suggestion-image-field"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -33,16 +34,29 @@ export function SuggestionDialog({
   const [projectId, setProjectId] = useState(selectedProjectId)
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
+  const [image, setImage] = useState<File | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  function handleOpenChange(nextOpen: boolean) {
-    setOpen(nextOpen)
+  function resetForm() {
+    setProjectId(selectedProjectId)
+    setTitle("")
+    setDescription("")
+    setImage(null)
     setError(null)
+  }
 
-    if (nextOpen && !title && !description) {
+  function handleOpenChange(nextOpen: boolean) {
+    if (pending && !nextOpen) return
+
+    if (nextOpen) {
       setProjectId(selectedProjectId)
+      setError(null)
+    } else {
+      resetForm()
     }
+
+    setOpen(nextOpen)
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -64,13 +78,13 @@ export function SuggestionDialog({
         projectId,
         title: cleanTitle,
         description: cleanDescription,
+        image,
       })
-      setTitle("")
-      setDescription("")
+      resetForm()
       setOpen(false)
     } catch (submitError) {
       setError(
-        submitError instanceof Error ? submitError.message : "建议提交失败",
+        submitError instanceof Error ? submitError.message : "建议提交失败"
       )
     } finally {
       setPending(false)
@@ -80,14 +94,15 @@ export function SuggestionDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
-        render={
-          <Button size="lg" disabled={projects.length === 0} />
-        }
+        render={<Button size="lg" disabled={projects.length === 0} />}
       >
         <Plus data-icon="inline-start" />
         提交建议
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg"
+        showCloseButton={!pending}
+      >
         <DialogHeader>
           <div className="mb-1 flex size-9 items-center justify-center rounded-lg bg-blue-50 text-primary dark:bg-blue-950">
             <Lightbulb className="size-4" />
@@ -106,6 +121,7 @@ export function SuggestionDialog({
               className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               value={projectId}
               onChange={(event) => setProjectId(event.target.value)}
+              disabled={pending}
               required
             >
               {projects.map((project) => (
@@ -119,7 +135,7 @@ export function SuggestionDialog({
           <div className="grid gap-1.5">
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="suggestion-title">建议标题</Label>
-              <span className="text-[0.7rem] tabular-nums text-muted-foreground">
+              <span className="text-[0.7rem] text-muted-foreground tabular-nums">
                 {title.length}/120
               </span>
             </div>
@@ -130,6 +146,7 @@ export function SuggestionDialog({
               minLength={2}
               maxLength={120}
               placeholder="用一句话说明你希望增加的能力"
+              disabled={pending}
               required
             />
           </div>
@@ -137,7 +154,7 @@ export function SuggestionDialog({
           <div className="grid gap-1.5">
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="suggestion-description">详细说明</Label>
-              <span className="text-[0.7rem] tabular-nums text-muted-foreground">
+              <span className="text-[0.7rem] text-muted-foreground tabular-nums">
                 {description.length}/4000
               </span>
             </div>
@@ -148,8 +165,15 @@ export function SuggestionDialog({
               maxLength={4000}
               placeholder="补充使用场景、期望结果或当前遇到的问题"
               className="min-h-28 resize-y"
+              disabled={pending}
             />
           </div>
+
+          <SuggestionImageField
+            value={image}
+            onChange={setImage}
+            disabled={pending}
+          />
 
           {error ? (
             <p role="alert" className="text-sm text-destructive">
@@ -159,7 +183,7 @@ export function SuggestionDialog({
 
           <DialogFooter className="mt-1">
             <Button type="submit" disabled={pending || !projectId}>
-              {pending ? "提交中…" : "确认提交"}
+              {pending ? "正在上传…" : "确认提交"}
             </Button>
           </DialogFooter>
         </form>

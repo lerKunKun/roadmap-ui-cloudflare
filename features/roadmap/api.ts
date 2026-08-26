@@ -74,7 +74,7 @@ export function mapRoadmapItemRow(row: RoadmapItemRow): RoadmapItem {
 }
 
 export function mapRoadmapStatusHistoryRow(
-  row: RoadmapStatusHistoryRow,
+  row: RoadmapStatusHistoryRow
 ): RoadmapStatusHistoryEntry {
   if (
     !Number.isSafeInteger(row.id) ||
@@ -108,12 +108,12 @@ export async function listProjects(): Promise<Project[]> {
 }
 
 export async function listRoadmapItems(
-  projectId: string,
+  projectId: string
 ): Promise<RoadmapItem[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("roadmap_items_public")
     .select(
-      "id,project_id,title,description,status,sort_order,vote_count,created_at,updated_at",
+      "id,project_id,title,description,status,sort_order,vote_count,created_at,updated_at"
     )
     .eq("project_id", projectId)
     .order("sort_order", { ascending: true })
@@ -127,7 +127,7 @@ export async function listRoadmapItems(
 }
 
 export async function listRoadmapStatusHistory(
-  itemId: string,
+  itemId: string
 ): Promise<RoadmapStatusHistoryEntry[]> {
   const { data, error } = await getSupabaseBrowserClient()
     .from("roadmap_status_history_public")
@@ -141,13 +141,13 @@ export async function listRoadmapStatusHistory(
   }
 
   return ((data ?? []) as RoadmapStatusHistoryRow[]).map(
-    mapRoadmapStatusHistoryRow,
+    mapRoadmapStatusHistoryRow
   )
 }
 
-async function invokePublicFunction<T>(
-  functionName: "submit-suggestion" | "vote",
-  body: unknown,
+async function invokeJsonPublicFunction<T>(
+  functionName: "vote",
+  body: unknown
 ): Promise<T> {
   const { url, publishableKey } = getSupabasePublicConfig()
   const response = await fetch(`${url}/functions/v1/${functionName}`, {
@@ -158,9 +158,9 @@ async function invokePublicFunction<T>(
     },
     body: JSON.stringify(body),
   })
-  const payload = (await response.json().catch(() => null)) as
-    | { message?: string }
-    | null
+  const payload = (await response.json().catch(() => null)) as {
+    message?: string
+  } | null
 
   if (!response.ok) {
     throw new Error(payload?.message ?? "请求失败，请稍后重试")
@@ -170,13 +170,34 @@ async function invokePublicFunction<T>(
 }
 
 export async function submitSuggestion(
-  input: SuggestionInput,
+  input: SuggestionInput
 ): Promise<{ itemId: string }> {
-  return invokePublicFunction("submit-suggestion", input)
+  const { url, publishableKey } = getSupabasePublicConfig()
+  const formData = new FormData()
+  formData.set("projectId", input.projectId)
+  formData.set("title", input.title)
+  formData.set("description", input.description)
+  if (input.image) {
+    formData.set("image", input.image, input.image.name)
+  }
+
+  const response = await fetch(`${url}/functions/v1/submit-suggestion`, {
+    method: "POST",
+    headers: { apikey: publishableKey },
+    body: formData,
+  })
+  const payload = (await response.json().catch(() => null)) as {
+    itemId?: string
+    message?: string
+  } | null
+
+  if (!response.ok) {
+    throw new Error(payload?.message ?? "请求失败，请稍后重试")
+  }
+
+  return payload as { itemId: string }
 }
 
-export async function voteForItem(
-  roadmapItemId: string,
-): Promise<VoteResult> {
-  return invokePublicFunction("vote", { roadmapItemId })
+export async function voteForItem(roadmapItemId: string): Promise<VoteResult> {
+  return invokeJsonPublicFunction("vote", { roadmapItemId })
 }

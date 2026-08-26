@@ -1,10 +1,40 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const { getSupabaseBrowserClient, getSupabasePublicConfig } = vi.hoisted(
+  () => ({
+    getSupabaseBrowserClient: vi.fn(),
+    getSupabasePublicConfig: vi.fn(),
+  })
+)
+
+vi.mock("@/lib/supabase/browser", () => ({
+  getSupabaseBrowserClient,
+  getSupabasePublicConfig,
+}))
 
 import {
   mapProjectRow,
   mapRoadmapItemRow,
   mapRoadmapStatusHistoryRow,
+  submitSuggestion,
+  voteForItem,
 } from "@/features/roadmap/api"
+
+beforeEach(() => {
+  getSupabaseBrowserClient.mockReset()
+  getSupabasePublicConfig.mockReset()
+  getSupabasePublicConfig.mockReturnValue({
+    url: "https://example.supabase.co",
+    publishableKey: "public-key",
+  })
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ itemId: "item-1" }),
+    })
+  )
+})
 
 describe("Roadmap API mapping", () => {
   it("maps database project fields into the UI model", () => {
@@ -15,7 +45,7 @@ describe("Roadmap API mapping", () => {
         slug: "advertising-system",
         project_url: "https://ads.example.test",
         sort_order: 2,
-      }),
+      })
     ).toEqual({
       id: "project-1",
       name: "广告系统",
@@ -37,7 +67,7 @@ describe("Roadmap API mapping", () => {
         vote_count: "42",
         created_at: "2026-08-24T08:00:00.000Z",
         updated_at: "2026-08-24T09:00:00.000Z",
-      }).voteCount,
+      }).voteCount
     ).toBe(42)
   })
 
@@ -53,7 +83,7 @@ describe("Roadmap API mapping", () => {
         vote_count: 0,
         created_at: "2026-08-24T08:00:00.000Z",
         updated_at: "2026-08-24T09:00:00.000Z",
-      }),
+      })
     ).toThrow("Roadmap 状态无效")
   })
 
@@ -65,7 +95,7 @@ describe("Roadmap API mapping", () => {
         from_status: "approved",
         to_status: "in_progress",
         changed_at: "2026-08-24T16:30:00.000Z",
-      }),
+      })
     ).toEqual({
       id: 7,
       roadmapItemId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -83,7 +113,91 @@ describe("Roadmap API mapping", () => {
         from_status: "approved",
         to_status: "archived",
         changed_at: "2026-08-24T16:30:00.000Z",
-      }),
+      })
     ).toThrow("Roadmap 状态历史无效")
+  })
+})
+
+describe("Roadmap public function requests", () => {
+  it("submits suggestion text and image as browser-generated multipart data", async () => {
+    const image = new File([new Uint8Array([1, 2, 3])], "proof.png", {
+      type: "image/png",
+    })
+
+    await submitSuggestion({
+      projectId: "project-1",
+      title: "增加通知",
+      description: "支持邮件通知",
+      image,
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://example.supabase.co/functions/v1/submit-suggestion",
+      expect.objectContaining({
+        method: "POST",
+        headers: { apikey: "public-key" },
+        body: expect.any(FormData),
+      })
+    )
+
+    const body = vi.mocked(fetch).mock.calls[0]?.[1]?.body
+    expect(body).toBeInstanceOf(FormData)
+    const formData = body as FormData
+    expect(Array.from(formData.keys())).toEqual([
+      "projectId",
+      "title",
+      "description",
+      "image",
+    ])
+    expect(formData.get("projectId")).toBe("project-1")
+    expect(formData.get("title")).toBe("增加通知")
+    expect(formData.get("description")).toBe("支持邮件通知")
+    const submittedImage = formData.get("image")
+    expect(submittedImage).toBeInstanceOf(File)
+    expect(submittedImage).toMatchObject({
+      name: "proof.png",
+      size: 3,
+      type: "image/png",
+    })
+    expect(
+      new Uint8Array(await (submittedImage as File).arrayBuffer())
+    ).toEqual(new Uint8Array(await image.arrayBuffer()))
+  })
+
+  it("omits the image field when a suggestion has no image", async () => {
+    await submitSuggestion({
+      projectId: "project-1",
+      title: "增加通知",
+      description: "",
+      image: null,
+    })
+
+    const body = vi.mocked(fetch).mock.calls[0]?.[1]?.body as FormData
+    expect(Array.from(body.entries())).toEqual([
+      ["projectId", "project-1"],
+      ["title", "增加通知"],
+      ["description", ""],
+    ])
+  })
+
+  it("keeps vote requests as JSON", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ voteCount: 4, duplicate: false }),
+    } as never)
+
+    await voteForItem("item-1")
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://example.supabase.co/functions/v1/vote",
+      {
+        method: "POST",
+        headers: {
+          apikey: "public-key",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ roadmapItemId: "item-1" }),
+      }
+    )
   })
 })
