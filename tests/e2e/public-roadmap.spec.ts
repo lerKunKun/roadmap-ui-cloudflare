@@ -47,8 +47,10 @@ async function installPublicApi(page: Page) {
   const items = [item(ITEM_ALERT, PROJECT_ALERT, "告警通知聚合")]
   let voted = false
   let historyRequests = 0
-  let mediaRequests = 0
+  const mediaRequestPaths: string[] = []
   let abortNextMedia = false
+  let mediaResponseGate: Promise<void> | null = null
+  let releaseMediaResponse: (() => void) | null = null
   let submissionGate: Promise<void> | null = null
   let releaseSubmission: (() => void) | null = null
   let lastSubmission: {
@@ -143,13 +145,19 @@ async function installPublicApi(page: Page) {
       await route.fulfill({ status: 201, json: { itemId: items.at(-1)!.id } })
     }
   )
-  await page.route(`**/media/${SUGGESTION_IMAGE}`, async (route) => {
-    mediaRequests += 1
+  await page.route(/^http:\/\/127\.0\.0\.1:31997\/media\/.*$/, async (route) => {
+    const path = new URL(route.request().url()).pathname
+    mediaRequestPaths.push(path)
+    if (path !== `/media/${SUGGESTION_IMAGE}`) {
+      await route.fulfill({ status: 404 })
+      return
+    }
     if (abortNextMedia) {
       abortNextMedia = false
       await route.abort("failed")
       return
     }
+    if (mediaResponseGate) await mediaResponseGate
     await route.fulfill({
       contentType: "image/png",
       headers: { "cache-control": "no-store" },
@@ -177,8 +185,8 @@ async function installPublicApi(page: Page) {
     abortNextMedia() {
       abortNextMedia = true
     },
-    getMediaRequestCount() {
-      return mediaRequests
+    getMediaRequestPaths() {
+      return [...mediaRequestPaths]
     },
     getLastSubmission() {
       return lastSubmission
@@ -191,6 +199,16 @@ async function installPublicApi(page: Page) {
         releaseSubmission?.()
         releaseSubmission = null
         submissionGate = null
+      }
+    },
+    holdNextMediaResponse() {
+      mediaResponseGate = new Promise<void>((resolve) => {
+        releaseMediaResponse = resolve
+      })
+      return () => {
+        releaseMediaResponse?.()
+        releaseMediaResponse = null
+        mediaResponseGate = null
       }
     },
   }
@@ -341,7 +359,7 @@ test("带图建议从本地预览、待审核提示到公开图片失败重试�
   })
   expect(moderationColors.background).not.toBe("rgba(0, 0, 0, 0)")
   expect(moderationColors.foreground).not.toBe(moderationColors.background)
-  expect(fixture.getMediaRequestCount()).toBe(0)
+  expect(fixture.getMediaRequestPaths()).toEqual([])
   await details.getByRole("button", { name: "关闭" }).click()
 
   fixture.approveSuggestion()
@@ -357,11 +375,30 @@ test("带图建议从本地预览、待审核提示到公开图片失败重试�
   await expect(
     details.getByRole("region", { name: "进展时间轴" })
   ).toBeVisible()
+  const releaseMediaResponse = fixture.holdNextMediaResponse()
   await details.getByRole("button", { name: "重新加载" }).click()
+  await expect.poll(() => fixture.getMediaRequestPaths()).toEqual([
+    `/media/${SUGGESTION_IMAGE}`,
+    `/media/${SUGGESTION_IMAGE}`,
+  ])
+  await expect(details.getByText("图片失败时正文、投票和时间轴都必须保留")).toBeVisible()
+  await expect(
+    details.getByRole("button", { name: "为“图片审核建议”投票" })
+  ).toBeVisible()
+  await expect(
+    details.getByRole("region", { name: "进展时间轴" })
+  ).toBeVisible()
+  releaseMediaResponse()
   await expect(
     details.getByRole("img", { name: "图片审核建议 的建议图片" })
   ).toBeVisible()
-  expect(fixture.getMediaRequestCount()).toBe(2)
+  await expect(details.getByText("图片失败时正文、投票和时间轴都必须保留")).toBeVisible()
+  await expect(
+    details.getByRole("button", { name: "为“图片审核建议”投票" })
+  ).toBeVisible()
+  await expect(
+    details.getByRole("region", { name: "进展时间轴" })
+  ).toBeVisible()
 
   await details.getByRole("button", { name: "关闭" }).click()
   await suggestionCard.getByRole("button", { name: "查看详情" }).click()
