@@ -470,13 +470,10 @@ export interface RoadmapStatusHistoryEntry {
   changedAt: string
 }
 
-export interface RoadmapTimelineEvent {
-  key: string
-  kind: "created" | "baseline" | "transition"
-  label: string
-  fromStatus?: RoadmapStatus
-  toStatus: RoadmapStatus
-}
+export type RoadmapTimelineEvent =
+  | { key: string; kind: "created"; label: string; toStatus?: RoadmapStatus }
+  | { key: string; kind: "baseline"; label: string; toStatus: RoadmapStatus }
+  | { key: string; kind: "transition"; label: string; fromStatus: RoadmapStatus; toStatus: RoadmapStatus }
 
 export interface RoadmapTimelineGroup {
   date: string
