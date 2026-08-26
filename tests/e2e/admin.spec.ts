@@ -293,6 +293,8 @@ test("管理端签名预览不阻塞阶段调整且先删 Storage 再删条目",
 }) => {
   const fixture = await installAdminApi(page, { imageItem: true })
   await page.emulateMedia({ colorScheme: "dark" })
+  const shortMobileViewport = { width: 390, height: 568 }
+  await page.setViewportSize(shortMobileViewport)
   await login(page)
 
   await page.getByRole("button", { name: "编辑“待审核截图建议”" }).click()
@@ -302,19 +304,37 @@ test("管理端签名预览不阻塞阶段调整且先删 Storage 再删条目",
   })
   await expect(preview).toBeVisible()
 
-  await page.setViewportSize({ width: 390, height: 844 })
   const dialogMetrics = await dialog.evaluate((element) => ({
+    ...element.getBoundingClientRect().toJSON(),
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,
   }))
+  expect(dialogMetrics.top).toBeGreaterThanOrEqual(16)
+  expect(dialogMetrics.bottom).toBeLessThanOrEqual(
+    shortMobileViewport.height - 16
+  )
+  expect(dialogMetrics.height).toBeLessThanOrEqual(
+    shortMobileViewport.height - 32
+  )
+  expect(dialogMetrics.scrollHeight).toBeGreaterThan(dialogMetrics.clientHeight)
   expect(dialogMetrics.scrollWidth).toBeLessThanOrEqual(dialogMetrics.clientWidth)
   const dialogBackground = await dialog.evaluate(
     (element) => getComputedStyle(element).backgroundColor
   )
   expect(dialogBackground).not.toBe("rgba(0, 0, 0, 0)")
 
+  const closeButton = dialog.getByRole("button", { name: "关闭" })
+  const saveButton = dialog.getByRole("button", { name: "保存条目" })
+  await saveButton.scrollIntoViewIfNeeded()
+  await expect(saveButton).toBeInViewport()
+  await closeButton.scrollIntoViewIfNeeded()
+  await expect(closeButton).toBeInViewport()
+
   await dialog.getByLabel("当前阶段").selectOption("approved")
-  await dialog.getByRole("button", { name: "保存条目" }).click()
+  await saveButton.scrollIntoViewIfNeeded()
+  await saveButton.click()
   await expect(
     page
       .getByRole("region", { name: "已批准" })

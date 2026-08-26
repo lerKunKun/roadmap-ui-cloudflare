@@ -215,7 +215,7 @@ roadmap-ui.pages.dev
 1. 提交含图建议后，公开待处理行只返回 `has_image = true`、`image_id = null`；详情显示审核提示，且不会请求 `/media/*`。猜测对象路径或直接访问 Storage URL 均不能读取私有对象。
 2. 管理端通过短时签名 URL 看见待审核预览，并可正常调整状态。
 3. 批准后重新查询公开列表获得 `image_id`，公开详情通过 `/media/{imageId}` 显示图片。
-4. 第一次媒体响应的 `CF-Cache-Status` 为 `MISS`，第二次为 `HIT`；两次都具备约定的缓存与安全响应头。确认 HIT 不新增 Supabase 图片视图查询或 Storage 读取。
+4. 第一次媒体响应的 `X-Roadmap-Cache` 为 `MISS`，第二次为 `HIT`；两次都具备约定的缓存与安全响应头。确认 HIT 不新增 Supabase 图片视图查询或 Storage 读取。
 5. 通过产品流程删除含图测试条目，确认先删除 Storage 对象，再删除条目，元数据数量与 `roadmap_image_storage_usage.used_bytes` 恢复到测试前值。
 6. 另建一条纯文字建议并删除，确认整个流程没有任何 Storage 请求。
 

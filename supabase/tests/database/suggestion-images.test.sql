@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(60);
+select plan(63);
 
 select has_table('public', 'roadmap_item_images', 'image metadata table exists');
 select has_table('public', 'roadmap_image_storage_usage', 'image usage table exists');
@@ -175,7 +175,8 @@ cross join (
     ('10000000-0000-4000-8000-000000000104'::uuid, 'Image height boundary fixture', 104),
     ('10000000-0000-4000-8000-000000000105'::uuid, 'Image area boundary fixture', 105),
     ('10000000-0000-4000-8000-000000000106'::uuid, 'Image capacity accepted fixture', 106),
-    ('10000000-0000-4000-8000-000000000107'::uuid, 'Image capacity rejected fixture', 107)
+    ('10000000-0000-4000-8000-000000000107'::uuid, 'Image capacity rejected fixture', 107),
+    ('10000000-0000-4000-8000-000000000108'::uuid, 'Image MIME boundary fixture', 108)
 ) as fixture(id, title, sort_order)
 where project.slug = 'advertising-system';
 
@@ -205,6 +206,21 @@ select lives_ok(
     )
   $$,
   'valid image metadata reserves capacity'
+);
+select throws_ok(
+  $$
+    insert into public.roadmap_item_images (
+      id, roadmap_item_id, storage_path, mime_type, size_bytes, width, height
+    ) values (
+      '20000000-0000-4000-8000-000000000109',
+      '10000000-0000-4000-8000-000000000108',
+      'suggestions/10000000-0000-4000-8000-000000000108/20000000-0000-4000-8000-000000000109.webp',
+      'image/webp', 1, 1, 1
+    )
+  $$,
+  '23514',
+  null,
+  'unsupported image metadata MIME is rejected'
 );
 select throws_ok(
   $$
@@ -381,6 +397,15 @@ set status = 'rejected'
 where id = '10000000-0000-4000-8000-000000000101';
 select is(
   (
+    select has_image
+    from public.roadmap_items_public
+    where id = '10000000-0000-4000-8000-000000000101'
+  ),
+  true,
+  'rejected item still reports that image metadata exists'
+);
+select is(
+  (
     select image_id
     from public.roadmap_items_public
     where id = '10000000-0000-4000-8000-000000000101'
@@ -521,10 +546,21 @@ select is(
   'capacity fixture resets usage to zero before rollback'
 );
 
+insert into public.suggestion_image_rate_limits (ip_hash, created_at)
+values (repeat('e', 64), now() - interval '49 hours');
 select is(
   public.consume_suggestion_image_quota(repeat('f', 64), 3),
   true,
   'first image quota event is allowed'
+);
+select is(
+  (
+    select count(*)
+    from public.suggestion_image_rate_limits
+    where ip_hash = repeat('e', 64)
+  ),
+  0::bigint,
+  'quota consumption deletes events older than forty-eight hours'
 );
 select is(
   public.consume_suggestion_image_quota(repeat('f', 64), 3),

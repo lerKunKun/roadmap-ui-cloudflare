@@ -140,7 +140,7 @@ export function ItemDialog({
 
   return (
     <Dialog open onOpenChange={changeOpen}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{item ? "编辑 Roadmap 条目" : "添加 Roadmap 条目"}</DialogTitle>
           <DialogDescription>
