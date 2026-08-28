@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
+import { ImageLightbox } from "@/components/roadmap/image-lightbox"
 import {
   Dialog,
   DialogContent,
@@ -201,21 +202,28 @@ export function ItemDialog({
                     </Button>
                   </div>
                 ) : visiblePreview.image ? (
-                  // Signed URLs are short-lived review credentials, never Storage paths.
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <ImageLightbox
                     src={visiblePreview.image.signedUrl}
                     alt={`待审核建议图片：${item!.title}`}
-                    className="max-h-72 w-full object-contain"
-                    onError={() => {
-                      setPreview({
-                        itemId: item!.id,
-                        status: "error",
-                        image: null,
-                        error: "建议图片加载失败，请重试",
-                      })
-                    }}
-                  />
+                    title={`${item!.title} 大图`}
+                    triggerLabel={`查看“${item!.title}”大图`}
+                  >
+                    {/* Signed URLs are short-lived review credentials, never Storage paths. */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={visiblePreview.image.signedUrl}
+                      alt={`待审核建议图片：${item!.title}`}
+                      className="max-h-72 w-full object-contain"
+                      onError={() => {
+                        setPreview({
+                          itemId: item!.id,
+                          status: "error",
+                          image: null,
+                          error: "建议图片加载失败，请重试",
+                        })
+                      }}
+                    />
+                  </ImageLightbox>
                 ) : null}
               </section>
             </div>

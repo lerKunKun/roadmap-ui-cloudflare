@@ -3,6 +3,7 @@
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { ImageLightbox } from "@/components/roadmap/image-lightbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import type { RoadmapItem } from "@/features/roadmap/types"
 
@@ -58,19 +59,27 @@ export function ItemImage({ item }: ItemImageProps) {
           </Button>
         </div>
       ) : (
-        // The canonical media URL and native load/error lifecycle are part of this component's contract.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          key={retryKey}
+        <ImageLightbox
           src={imageUrl}
           alt={`${item.title} 的建议图片`}
-          loading="lazy"
-          className={`max-h-72 w-full object-contain ${
-            imageState === "loaded" ? "opacity-100" : "opacity-0"
-          }`}
-          onLoad={() => setImageState("loaded")}
-          onError={() => setImageState("error")}
-        />
+          title={`${item.title} 大图`}
+          triggerLabel={`查看“${item.title}”大图`}
+          disabled={imageState !== "loaded"}
+        >
+          {/* The canonical media URL and native load/error lifecycle are part of this component's contract. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            key={retryKey}
+            src={imageUrl}
+            alt={`${item.title} 的建议图片`}
+            loading="lazy"
+            className={`max-h-72 w-full object-contain ${
+              imageState === "loaded" ? "opacity-100" : "opacity-0"
+            }`}
+            onLoad={() => setImageState("loaded")}
+            onError={() => setImageState("error")}
+          />
+        </ImageLightbox>
       )}
     </section>
   )

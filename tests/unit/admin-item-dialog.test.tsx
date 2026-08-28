@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -103,6 +110,36 @@ describe("ItemDialog admin image preview", () => {
       "border",
       "bg-muted/30"
     )
+  })
+
+  it("点击签名预览后打开管理端大图并恢复触发器焦点", async () => {
+    const user = userEvent.setup()
+    renderDialog()
+    await screen.findByRole("img", {
+      name: `待审核建议图片：${item.title}`,
+    })
+    const trigger = screen.getByRole("button", {
+      name: `查看“${item.title}”大图`,
+    })
+
+    await user.click(trigger)
+
+    const lightbox = screen.getByRole("dialog", {
+      name: `${item.title} 大图`,
+    })
+    expect(
+      within(lightbox).getByRole("img", {
+        name: `待审核建议图片：${item.title}（大图）`,
+      })
+    ).toHaveAttribute("src", preview.signedUrl)
+
+    await user.click(
+      within(lightbox).getByRole("button", { name: "关闭大图" })
+    )
+    expect(
+      screen.queryByRole("dialog", { name: `${item.title} 大图` })
+    ).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
   })
 
   it("预览加载失败后可重试且不妨碍编辑标题和阶段", async () => {

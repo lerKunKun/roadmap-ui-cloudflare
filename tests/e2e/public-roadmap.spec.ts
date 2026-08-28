@@ -406,6 +406,27 @@ test("带图建议从本地预览、待审核提示到公开图片失败重试�
     details.getByRole("img", { name: "图片审核建议 的建议图片" })
   ).toBeVisible()
 
+  const imageTrigger = details.getByRole("button", {
+    name: "查看“图片审核建议”大图",
+  })
+  await imageTrigger.click()
+  const lightbox = page.getByRole("dialog", { name: "图片审核建议 大图" })
+  await expect(
+    lightbox.getByRole("img", { name: "图片审核建议 的建议图片（大图）" })
+  ).toBeVisible()
+  const lightboxMetrics = await lightbox.evaluate((element) => ({
+    ...element.getBoundingClientRect().toJSON(),
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }))
+  expect(lightboxMetrics.left).toBeGreaterThanOrEqual(16)
+  expect(lightboxMetrics.right).toBeLessThanOrEqual(390 - 16)
+  expect(lightboxMetrics.scrollWidth).toBeLessThanOrEqual(
+    lightboxMetrics.clientWidth
+  )
+  await lightbox.getByRole("button", { name: "关闭大图" }).click()
+  await expect(imageTrigger).toBeFocused()
+
   const detailMetrics = await details.evaluate((element) => ({
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth,

@@ -304,6 +304,26 @@ test("管理端签名预览不阻塞阶段调整且先删 Storage 再删条目",
   })
   await expect(preview).toBeVisible()
 
+  const imageTrigger = dialog.getByRole("button", {
+    name: "查看“待审核截图建议”大图",
+  })
+  await imageTrigger.click()
+  const lightbox = page.getByRole("dialog", { name: "待审核截图建议 大图" })
+  await expect(
+    lightbox.getByRole("img", {
+      name: "待审核建议图片：待审核截图建议（大图）",
+    })
+  ).toBeVisible()
+  const lightboxMetrics = await lightbox.evaluate((element) =>
+    element.getBoundingClientRect().toJSON()
+  )
+  expect(lightboxMetrics.top).toBeGreaterThanOrEqual(16)
+  expect(lightboxMetrics.bottom).toBeLessThanOrEqual(
+    shortMobileViewport.height - 16
+  )
+  await lightbox.getByRole("button", { name: "关闭大图" }).click()
+  await expect(imageTrigger).toBeFocused()
+
   const dialogMetrics = await dialog.evaluate((element) => ({
     ...element.getBoundingClientRect().toJSON(),
     clientHeight: element.clientHeight,

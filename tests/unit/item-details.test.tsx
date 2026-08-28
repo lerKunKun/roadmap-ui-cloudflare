@@ -142,6 +142,37 @@ describe("ItemDetails", () => {
     ).toBeNull()
   })
 
+  it("opens the public image in a large dialog and restores trigger focus", async () => {
+    const user = userEvent.setup()
+    const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+    renderDetails({ item: { ...item, hasImage: true, imageId } })
+    fireEvent.load(
+      screen.getByRole("img", { name: `${item.title} 的建议图片` })
+    )
+    const trigger = screen.getByRole("button", {
+      name: `查看“${item.title}”大图`,
+    })
+
+    await user.click(trigger)
+
+    const lightbox = screen.getByRole("dialog", {
+      name: `${item.title} 大图`,
+    })
+    expect(
+      within(lightbox).getByRole("img", {
+        name: `${item.title} 的建议图片（大图）`,
+      })
+    ).toHaveAttribute("src", `/media/${imageId}`)
+
+    await user.click(
+      within(lightbox).getByRole("button", { name: "关闭大图" })
+    )
+    expect(
+      screen.queryByRole("dialog", { name: `${item.title} 大图` })
+    ).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
   it("keeps the rest of the dialog visible when an image fails", async () => {
     const imageId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
     renderDetails({ item: { ...item, hasImage: true, imageId } })
