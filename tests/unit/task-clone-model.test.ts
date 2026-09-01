@@ -163,6 +163,13 @@ describe("task clone reconciliation", () => {
         allowedMimeTypes: ["image/jpeg", "image/png"],
       },
       authUsers: [],
+      storageObjects: [
+        {
+          name: manifest.images[0].storagePath,
+          sizeBytes: manifest.images[0].sizeBytes,
+          mimeType: manifest.images[0].mimeType,
+        },
+      ],
     }
 
     expect(
@@ -208,6 +215,7 @@ describe("task clone reconciliation", () => {
         allowedMimeTypes: ["image/jpeg", "image/png"],
       },
       authUsers: [{ email: "unexpected@example.com" }],
+      storageObjects: [],
     }
 
     const result = reconcileSnapshot(manifest, audit, { expectedAuthUsers: 0 })
@@ -217,6 +225,7 @@ describe("task clone reconciliation", () => {
       expect.arrayContaining([
         "公开票数不一致",
         "图片对象哈希不一致",
+        "图片对象路径不一致",
         "图片逻辑用量不一致",
         "目标 votes 必须为空",
         "目标 Auth 用户不符合预期",

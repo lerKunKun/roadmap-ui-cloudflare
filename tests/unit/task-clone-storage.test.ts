@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest"
 import {
   copyImageObjects,
   hydrateImageHashes,
+  removeCopiedObjects,
 } from "../../scripts/task-clone/storage.mjs"
 
 const firstBytes = new TextEncoder().encode("hello")
 const secondBytes = new TextEncoder().encode("world")
+const SOURCE_URL = "https://abcdefghijklmnopqrst.supabase.co"
+const TARGET_URL = "https://bcdefghijklmnopqrstu.supabase.co"
 
 function manifestWithImages() {
   return {
@@ -61,7 +64,7 @@ describe("task clone storage copy", () => {
 
     const hydrated = await hydrateImageHashes({
       manifest,
-      source: { url: "https://source.supabase.co", secretKey: "source-secret" },
+      source: { url: SOURCE_URL, secretKey: "source-secret" },
       fetchImpl,
     })
 
@@ -85,7 +88,7 @@ describe("task clone storage copy", () => {
     await expect(
       hydrateImageHashes({
         manifest: manifestWithImages(),
-        source: { url: "https://source.supabase.co", secretKey: "source-secret" },
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
         fetchImpl,
       }),
     ).rejects.toMatchObject({ code: "SOURCE_SNAPSHOT_STALE" })
@@ -100,7 +103,7 @@ describe("task clone storage copy", () => {
     await expect(
       hydrateImageHashes({
         manifest: { ...manifestWithImages(), images: [manifestWithImages().images[0]] },
-        source: { url: "https://source.supabase.co", secretKey: "source-secret" },
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
         fetchImpl,
       }),
     ).rejects.toThrow("源图片元数据不一致")
@@ -121,8 +124,8 @@ describe("task clone storage copy", () => {
     await expect(
       copyImageObjects({
         manifest,
-        source: { url: "https://source.supabase.co", secretKey: "source-secret" },
-        target: { url: "https://target.supabase.co", secretKey: "target-secret" },
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
+        target: { url: TARGET_URL, secretKey: "target-secret" },
         fetchImpl,
       }),
     ).rejects.toMatchObject({ code: "TARGET_OBJECT_EXISTS" })
@@ -132,7 +135,7 @@ describe("task clone storage copy", () => {
   it("cleans uploaded target objects in reverse order after a later failure", async () => {
     const hydrated = await hydrateImageHashes({
       manifest: manifestWithImages(),
-      source: { url: "https://source.supabase.co", secretKey: "source-secret" },
+      source: { url: SOURCE_URL, secretKey: "source-secret" },
       fetchImpl: async (input) => {
         const url = String(input)
         const bytes = url.endsWith(".jpg") ? firstBytes : secondBytes
@@ -148,7 +151,7 @@ describe("task clone storage copy", () => {
       const request = new Request(input, init)
       operations.push(`${request.method} ${request.url.split("/").at(-1)}`)
       if (request.method === "HEAD") return new Response(null, { status: 404 })
-      if (request.url.startsWith("https://source")) {
+      if (request.url.startsWith(SOURCE_URL)) {
         const bytes = request.url.endsWith(".jpg") ? firstBytes : secondBytes
         const type = request.url.endsWith(".jpg") ? "image/jpeg" : "image/png"
         return new Response(bytes, {
@@ -167,8 +170,8 @@ describe("task clone storage copy", () => {
     await expect(
       copyImageObjects({
         manifest: hydrated,
-        source: { url: "https://source.supabase.co", secretKey: "source-secret" },
-        target: { url: "https://target.supabase.co", secretKey: "target-secret" },
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
+        target: { url: TARGET_URL, secretKey: "target-secret" },
         fetchImpl,
       }),
     ).rejects.toThrow("目标图片复制失败")
@@ -176,5 +179,29 @@ describe("task clone storage copy", () => {
     expect(operations.filter((operation) => operation.startsWith("DELETE"))).toEqual([
       "DELETE 30000000-0000-4000-8000-000000000001.jpg",
     ])
+  })
+
+  it("independently refuses copying to or deleting from the protected source", async () => {
+    const manifest = manifestWithImages()
+    manifest.images[0].sha256 = "a".repeat(64)
+    manifest.images = [manifest.images[0]]
+
+    await expect(
+      copyImageObjects({
+        manifest,
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
+        target: { url: SOURCE_URL, secretKey: "source-secret" },
+        fetchImpl: async () => new Response(null, { status: 404 }),
+      }),
+    ).rejects.toThrow("拒绝修改源 Storage")
+
+    await expect(
+      removeCopiedObjects({
+        paths: [manifest.images[0].storagePath],
+        target: { url: SOURCE_URL, secretKey: "source-secret" },
+        protectedSource: { url: SOURCE_URL, secretKey: "source-secret" },
+        fetchImpl: async () => new Response(null, { status: 200 }),
+      }),
+    ).rejects.toThrow("拒绝修改源 Storage")
   })
 })

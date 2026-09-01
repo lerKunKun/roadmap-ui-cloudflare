@@ -4,10 +4,12 @@ import {
   buildImportSql,
   buildSnapshotSql,
   buildTargetAuditSql,
+  buildTargetCloneInfrastructureSql,
   captureSourceSnapshot,
   importSnapshot,
   parseDbQueryJson,
 } from "../../scripts/task-clone/database.mjs"
+import { createCopyReceipt } from "../../scripts/task-clone/receipts.mjs"
 
 const emptySnapshot = {
   version: 1,
@@ -116,7 +118,12 @@ describe("task clone database import", () => {
   }
 
   it("builds an injection-safe all-or-nothing import", () => {
-    const sql = buildImportSql(manifest)
+    const receipt = createCopyReceipt({
+      manifest,
+      targetProjectRef: "bcdefghijklmnopqrstu",
+      appCommit: "b".repeat(40),
+    })
+    const sql = buildImportSql(manifest, receipt)
 
     expect(sql).toContain("begin;")
     expect(sql).toContain("pg_advisory_xact_lock")
@@ -124,6 +131,7 @@ describe("task clone database import", () => {
     expect(sql).toContain("jsonb_to_recordset")
     expect(sql).toContain("delete from public.roadmap_status_history")
     expect(sql).toContain("insert into public.roadmap_item_images")
+    expect(sql).toContain("insert into public.roadmap_clone_import_markers")
     expect(sql).toContain("from public.votes")
     expect(sql).toContain("from public.suggestion_rate_limits")
     expect(sql).toContain("from public.suggestion_image_rate_limits")
@@ -146,6 +154,11 @@ describe("task clone database import", () => {
         query,
         targetRef: "bcdefghijklmnopqrstu",
         manifest,
+        receipt: createCopyReceipt({
+          manifest,
+          targetProjectRef: "bcdefghijklmnopqrstu",
+          appCommit: "b".repeat(40),
+        }),
       }),
     ).resolves.toEqual({ imported: true })
   })
@@ -160,6 +173,19 @@ describe("task clone database import", () => {
     expect(sql).toContain("from public.suggestion_image_rate_limits")
     expect(sql).toContain("from auth.users")
     expect(sql).toContain("from storage.buckets")
+    expect(sql).toContain("from storage.objects")
+    expect(sql).toContain("from public.roadmap_clone_import_markers")
     expect(sql.trimEnd()).toMatch(/commit;$/)
+  })
+
+  it("keeps clone marker DDL in a target-only guarded SQL step", () => {
+    const sql = buildTargetCloneInfrastructureSql("bcdefghijklmnopqrstu")
+
+    expect(sql).toContain("create table if not exists public.roadmap_clone_import_markers")
+    expect(sql).toContain("bcdefghijklmnopqrstu")
+    expect(sql).toContain("revoke all")
+    expect(() =>
+      buildTargetCloneInfrastructureSql("invalid-ref"),
+    ).toThrow("目标 Supabase Project Ref 无效")
   })
 })

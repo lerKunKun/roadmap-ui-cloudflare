@@ -16,6 +16,39 @@ function objectUrl(projectUrl, storagePath) {
   return `${projectUrl.replace(/\/$/, "")}/storage/v1/object/roadmap-images/${encodedPath}`
 }
 
+function projectRefFromUrl(value) {
+  let url
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error("Supabase Storage URL 无效")
+  }
+  const match = /^([a-z0-9]{20})\.supabase\.co$/.exec(url.hostname)
+  if (url.protocol !== "https:" || !match || url.pathname !== "/") {
+    throw new Error("Supabase Storage URL 无效")
+  }
+  return match[1]
+}
+
+function assertCopyIdentity(manifest, source, target) {
+  const sourceRef = projectRefFromUrl(source.url)
+  const targetRef = projectRefFromUrl(target.url)
+  if (sourceRef !== manifest.sourceProjectRef) {
+    throw new Error("源 Storage 与复制清单不匹配")
+  }
+  if (targetRef === sourceRef || target.secretKey === source.secretKey) {
+    throw new Error("拒绝修改源 Storage")
+  }
+}
+
+function assertDeleteIdentity(target, protectedSource) {
+  const targetRef = projectRefFromUrl(target.url)
+  const sourceRef = projectRefFromUrl(protectedSource.url)
+  if (targetRef === sourceRef || target.secretKey === protectedSource.secretKey) {
+    throw new Error("拒绝修改源 Storage")
+  }
+}
+
 function storageHeaders(secretKey, extra = {}) {
   return {
     apikey: secretKey,
@@ -57,7 +90,15 @@ async function readVerifiedImage({ image, source, fetchImpl }) {
   return { bytes, sha256 }
 }
 
-export async function hydrateImageHashes({ manifest, source, fetchImpl = fetch }) {
+export async function hydrateImageHashes({
+  manifest,
+  source,
+  expectedProjectRef = manifest.sourceProjectRef,
+  fetchImpl = fetch,
+}) {
+  if (expectedProjectRef && projectRefFromUrl(source.url) !== expectedProjectRef) {
+    throw new Error("Storage 读取项目与已验证项目不匹配")
+  }
   const images = []
   for (const image of manifest.images) {
     const { sha256 } = await readVerifiedImage({ image, source, fetchImpl })
@@ -69,8 +110,10 @@ export async function hydrateImageHashes({ manifest, source, fetchImpl = fetch }
 export async function removeCopiedObjects({
   paths,
   target,
+  protectedSource,
   fetchImpl = fetch,
 }) {
+  assertDeleteIdentity(target, protectedSource)
   const failures = []
   for (const path of [...paths].reverse()) {
     try {
@@ -97,6 +140,7 @@ export async function copyImageObjects({
   target,
   fetchImpl = fetch,
 }) {
+  assertCopyIdentity(manifest, source, target)
   for (const image of manifest.images) {
     if (!/^[a-f0-9]{64}$/.test(image.sha256 ?? "")) {
       throw new CloneStorageError("IMAGE_HASH_MISSING", "复制清单缺少图片校验值")
@@ -142,7 +186,12 @@ export async function copyImageObjects({
     }
   } catch (error) {
     try {
-      await removeCopiedObjects({ paths: uploadedPaths, target, fetchImpl })
+      await removeCopiedObjects({
+        paths: uploadedPaths,
+        target,
+        protectedSource: source,
+        fetchImpl,
+      })
     } catch (cleanupError) {
       throw new AggregateError(
         [error, cleanupError],

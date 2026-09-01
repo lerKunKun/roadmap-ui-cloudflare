@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import {
+  assertTaskIdentity,
   generateTargetSecrets,
   parseTaskInputs,
   validateTaskIdentity,
@@ -14,6 +15,10 @@ import { runCaptured } from "../../scripts/task-clone/command.mjs"
 
 const sourceInputs = {
   SUPABASE_PROJECT_REF: "abcdefghijklmnopqrst",
+  SUPABASE_PUBLISHABLE_KEY: `sb_publishable_${"s".repeat(32)}`,
+  SUPABASE_SECRET_KEY: `sb_secret_${"s".repeat(32)}`,
+  SUPABASE_DB_PASSWORD: "Source-db-password-2026!LongAndSecure",
+  ADMIN_PASSWORD: "Source-admin-password-2026!LongAndSafe",
   VOTE_IP_SALT: "a".repeat(64),
 }
 
@@ -50,6 +55,30 @@ describe("task clone configuration", () => {
       "VOTE_IP_SALT：必须与源实例不同",
     ])
     expect(errors.join(" ")).not.toContain(targetInputs.SUPABASE_SECRET_KEY)
+  })
+
+  it("throws before a stage can use the source project as the target", () => {
+    expect(() =>
+      assertTaskIdentity(sourceInputs, {
+        ...targetInputs,
+        SUPABASE_PROJECT_REF: sourceInputs.SUPABASE_PROJECT_REF,
+        SUPABASE_URL: `https://${sourceInputs.SUPABASE_PROJECT_REF}.supabase.co`,
+      }),
+    ).toThrow("目标部署配置无效")
+  })
+
+  it.each([
+    "SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_DB_PASSWORD",
+    "ADMIN_PASSWORD",
+  ])("rejects reuse of source credential %s", (field) => {
+    expect(
+      validateTaskIdentity(sourceInputs, {
+        ...targetInputs,
+        [field]: sourceInputs[field as keyof typeof sourceInputs],
+      }),
+    ).toContain(`${field}：必须与源实例不同`)
   })
 
   it("generates strong target-only passwords and a hexadecimal salt", () => {

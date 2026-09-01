@@ -1,6 +1,34 @@
 import { parseCloneManifest } from "./model.mjs"
+import { copyReceiptMatchesManifest } from "./receipts.mjs"
 
 const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/
+
+export function buildTargetCloneInfrastructureSql(targetRef) {
+  if (!PROJECT_REF_PATTERN.test(targetRef)) {
+    throw new Error("目标 Supabase Project Ref 无效")
+  }
+  return `begin;
+select pg_advisory_xact_lock(hashtextextended('task-roadmap-clone-schema:${targetRef}', 0));
+create table if not exists public.roadmap_clone_import_markers (
+  singleton boolean primary key default true check (singleton),
+  source_project_ref text not null check (source_project_ref ~ '^[a-z0-9]{20}$'),
+  target_project_ref text not null check (target_project_ref ~ '^[a-z0-9]{20}$'),
+  manifest_digest text not null check (manifest_digest ~ '^[0-9a-f]{64}$'),
+  object_digest text not null check (object_digest ~ '^[0-9a-f]{64}$'),
+  dataset_digests jsonb not null,
+  app_commit text not null check (app_commit ~ '^[0-9a-f]{40}$'),
+  captured_at timestamptz not null,
+  counts jsonb not null,
+  imported_at timestamptz not null default now(),
+  check (source_project_ref <> target_project_ref)
+);
+alter table public.roadmap_clone_import_markers enable row level security;
+revoke all on table public.roadmap_clone_import_markers from anon, authenticated;
+grant all on table public.roadmap_clone_import_markers to service_role;
+comment on table public.roadmap_clone_import_markers is
+  'Target-only secret-free receipt for the independent Task Roadmap import';
+commit;`
+}
 
 export function buildSnapshotSql(sourceRef) {
   if (!PROJECT_REF_PATTERN.test(sourceRef)) {
@@ -110,9 +138,16 @@ export async function captureSourceSnapshot({ query, sourceRef }) {
   return manifest
 }
 
-export function buildImportSql(inputManifest) {
+export function buildImportSql(inputManifest, receipt) {
   const manifest = parseCloneManifest(inputManifest)
+  if (!copyReceiptMatchesManifest(receipt, manifest)) {
+    throw new Error("数据库导入回执无效")
+  }
   const payload = Buffer.from(JSON.stringify(manifest), "utf8").toString("base64")
+  const receiptPayload = Buffer.from(
+    JSON.stringify({ ...receipt, version: 1 }),
+    "utf8",
+  ).toString("base64")
 
   return `begin;
 select pg_advisory_xact_lock(hashtextextended('task-roadmap-clone-v1', 0));
@@ -124,6 +159,7 @@ begin
     or exists (select 1 from public.suggestion_rate_limits)
     or exists (select 1 from public.suggestion_image_rate_limits)
     or exists (select 1 from public.roadmap_item_images)
+    or exists (select 1 from public.roadmap_clone_import_markers)
     or (select used_bytes from public.roadmap_image_storage_usage where singleton) <> 0
   then
     raise exception 'task_clone_target_not_fresh';
@@ -143,6 +179,12 @@ create temporary table task_clone_payload (document jsonb not null) on commit dr
 insert into task_clone_payload (document)
 values (
   convert_from(decode($snapshot$${payload}$snapshot$, 'base64'), 'UTF8')::jsonb
+);
+
+create temporary table task_clone_receipt (document jsonb not null) on commit drop;
+insert into task_clone_receipt (document)
+values (
+  convert_from(decode($receipt$${receiptPayload}$receipt$, 'base64'), 'UTF8')::jsonb
 );
 
 delete from public.projects;
@@ -287,6 +329,29 @@ begin
 end;
 $$;
 
+insert into public.roadmap_clone_import_markers (
+  singleton,
+  source_project_ref,
+  target_project_ref,
+  manifest_digest,
+  object_digest,
+  dataset_digests,
+  app_commit,
+  captured_at,
+  counts
+)
+select
+  true,
+  document ->> 'sourceProjectRef',
+  document ->> 'targetProjectRef',
+  document ->> 'manifestDigest',
+  document ->> 'objectDigest',
+  document -> 'datasetDigests',
+  document ->> 'appCommit',
+  (document ->> 'capturedAt')::timestamptz,
+  document -> 'counts'
+from task_clone_receipt;
+
 select jsonb_build_object('imported', true) as result;
 commit;`
 }
@@ -343,6 +408,15 @@ select jsonb_build_object(
     ) order by image.storage_path, image.id)
     from public.roadmap_item_images as image
   ), '[]'::jsonb),
+  'storageObjects', coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'name', object.name,
+      'sizeBytes', coalesce((object.metadata ->> 'size')::bigint, 0),
+      'mimeType', object.metadata ->> 'mimetype'
+    ) order by object.name)
+    from storage.objects as object
+    where object.bucket_id = 'roadmap-images'
+  ), '[]'::jsonb),
   'operationalCounts', jsonb_build_object(
     'votes', (select count(*) from public.votes),
     'suggestionRateLimits', (select count(*) from public.suggestion_rate_limits),
@@ -364,18 +438,35 @@ select jsonb_build_object(
   'authUsers', coalesce((
     select jsonb_agg(jsonb_build_object('email', user_row.email) order by user_row.email)
     from auth.users as user_row
-  ), '[]'::jsonb)
+  ), '[]'::jsonb),
+  'cloneImportMarker', (
+    select jsonb_build_object(
+      'sourceProjectRef', marker.source_project_ref,
+      'targetProjectRef', marker.target_project_ref,
+      'manifestDigest', marker.manifest_digest,
+      'objectDigest', marker.object_digest,
+      'datasetDigests', marker.dataset_digests,
+      'appCommit', marker.app_commit,
+      'capturedAt', marker.captured_at,
+      'counts', marker.counts
+    )
+    from public.roadmap_clone_import_markers as marker
+    where marker.singleton
+  )
 ) as audit;
 commit;`
 }
 
-export async function importSnapshot({ query, targetRef, manifest }) {
+export async function importSnapshot({ query, targetRef, manifest, receipt }) {
   if (!PROJECT_REF_PATTERN.test(targetRef)) {
     throw new Error("目标 Supabase Project Ref 无效")
   }
+  if (receipt?.targetProjectRef !== targetRef) {
+    throw new Error("数据库导入回执与目标项目不匹配")
+  }
   const result = await query({
     projectRef: targetRef,
-    sql: buildImportSql(manifest),
+    sql: buildImportSql(manifest, receipt),
     operation: "导入目标 Roadmap 快照",
   })
   const imported = parseDbQueryColumn(

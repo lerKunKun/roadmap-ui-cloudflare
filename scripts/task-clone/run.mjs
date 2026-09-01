@@ -5,19 +5,38 @@ import {
   readDeploymentInputs,
   validateDeploymentInputs,
 } from "../deployment-inputs.mjs"
-import { auditTarget, captureSourceSnapshot, importSnapshot } from "./database.mjs"
+import {
+  auditTarget,
+  buildTargetCloneInfrastructureSql,
+  captureSourceSnapshot,
+  importSnapshot,
+} from "./database.mjs"
 import { runCaptured } from "./command.mjs"
 import {
   TASK_ADMIN_EMAIL,
   TASK_DEPLOYMENT_INPUTS_FILE,
   TASK_DOMAIN,
   TASK_PAGES_PROJECT,
+  assertTaskIdentity,
   generateTargetSecrets,
   readTaskInputs,
   validateTaskIdentity,
   writeTargetInputsAtomic,
 } from "./config.mjs"
 import { reconcileSnapshot } from "./model.mjs"
+import {
+  TASK_COPY_RECEIPT_FILE,
+  TASK_AMBIGUITY_RECEIPT_FILE,
+  TASK_SMOKE_RECEIPT_FILE,
+  createCopyReceipt,
+  datasetDigests,
+  objectDigest,
+  readCopyReceipt,
+  readOptionalCopyReceipt,
+  readSmokeReceipt,
+  removeReceipt,
+  writeReceiptAtomic,
+} from "./receipts.mjs"
 import {
   createCloudflareProvider,
   createSupabaseProvider,
@@ -47,6 +66,46 @@ function ensureSuccessReport(report) {
   return report
 }
 
+export function validateStageReceipts(
+  stage,
+  {
+    sourceRef,
+    targetRef,
+    commit,
+    copyReceipt,
+    smokeReceipt = /** @type {Record<string, any> | null} */ (null),
+  },
+) {
+  if (
+    copyReceipt?.sourceProjectRef !== sourceRef ||
+    copyReceipt?.targetProjectRef !== targetRef ||
+    copyReceipt?.appCommit !== commit
+  ) {
+    throw new Error("复制回执与当前源、目标或提交不匹配")
+  }
+  if (stage === "deploy") return true
+  const expectedBaseUrl =
+    stage === "domain"
+      ? `https://${TASK_PAGES_PROJECT}.pages.dev/`
+      : stage === "status"
+        ? `https://${TASK_DOMAIN}/`
+        : null
+  if (!expectedBaseUrl) throw new Error("回执校验阶段无效")
+  if (
+    smokeReceipt?.baseUrl !== expectedBaseUrl ||
+    smokeReceipt?.targetProjectRef !== targetRef ||
+    smokeReceipt?.copyDigest !== copyReceipt.manifestDigest ||
+    smokeReceipt?.appCommit !== commit
+  ) {
+    throw new Error(
+      stage === "status"
+        ? "最终域名冒烟回执与当前部署不匹配"
+        : "稳定 Pages 冒烟回执与当前部署不匹配",
+    )
+  }
+  return true
+}
+
 export function validateTargetReadyAudit(audit, { expectedAuthEmails }) {
   const differences = []
   const add = (condition, message) => {
@@ -73,6 +132,27 @@ export function validateTargetReadyAudit(audit, { expectedAuthEmails }) {
     Number(audit.usedBytes) ===
       audit.images.reduce((total, image) => total + Number(image.sizeBytes), 0),
     "目标图片逻辑用量不一致",
+  )
+  const imagePaths = audit.images.map((image) => image.storagePath).sort()
+  const objectPaths = (audit.storageObjects ?? []).map((object) => object.name).sort()
+  add(JSON.stringify(imagePaths) === JSON.stringify(objectPaths), "图片对象路径不一致")
+  const imageObjectMetadata = audit.images
+    .map((image) => ({
+      name: image.storagePath,
+      sizeBytes: Number(image.sizeBytes),
+      mimeType: image.mimeType,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+  const storageObjectMetadata = (audit.storageObjects ?? [])
+    .map((object) => ({
+      name: object.name,
+      sizeBytes: Number(object.sizeBytes),
+      mimeType: object.mimeType,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+  add(
+    JSON.stringify(imageObjectMetadata) === JSON.stringify(storageObjectMetadata),
+    "图片对象元数据不一致",
   )
   add(
     audit.bucket?.public === false &&
@@ -114,12 +194,54 @@ export async function copyTarget(context) {
   }
 
   if (!manifest) throw new Error("无法获取稳定的源数据快照")
+  let receipt = null
   let imported = false
   try {
-    await context.importData(manifest)
+    receipt = context.prepareImport
+      ? await context.prepareImport(manifest)
+      : null
+    try {
+      await context.importData(manifest, receipt)
+    } catch (error) {
+      let outcome = "unknown"
+      try {
+        if (context.confirmImport) outcome = await context.confirmImport(receipt)
+      } catch {
+        outcome = "unknown"
+      }
+      if (outcome === "committed") {
+        imported = true
+      } else if (outcome === "unknown") {
+        const ambiguityError = Object.assign(
+          new Error("目标数据库提交结果不明，已保留对象并写入待确认回执"),
+          { code: "IMPORT_COMMIT_UNKNOWN", cause: error },
+        )
+        try {
+          if (context.persistAmbiguityReceipt) {
+            await context.persistAmbiguityReceipt(receipt)
+          }
+        } catch (receiptError) {
+          throw Object.assign(
+            new AggregateError(
+              [ambiguityError, receiptError],
+              "目标数据库提交结果不明，且待确认回执写入失败",
+            ),
+            { code: "IMPORT_COMMIT_UNKNOWN" },
+          )
+        }
+        throw ambiguityError
+      } else {
+        throw error
+      }
+    }
     imported = true
-    return ensureSuccessReport(await context.audit(manifest))
+    const report = ensureSuccessReport(await context.audit(manifest, receipt))
+    if (context.persistCopyReceipt) {
+      await context.persistCopyReceipt(receipt, report)
+    }
+    return report
   } catch (error) {
+    if (error?.code === "IMPORT_COMMIT_UNKNOWN") throw error
     const cleanupErrors = []
     if (imported && context.cleanupImportedData) {
       try {
@@ -169,6 +291,8 @@ async function loadSourceInputs() {
 async function loadProviders(sourceInputs) {
   const supabase = createSupabaseProvider({
     accessToken: sourceInputs.SUPABASE_ACCESS_TOKEN,
+    protectedProjectRef: sourceInputs.SUPABASE_PROJECT_REF,
+    protectedSecretKey: sourceInputs.SUPABASE_SECRET_KEY,
     runCommand: runCaptured,
     workdir: process.cwd(),
   })
@@ -176,6 +300,10 @@ async function loadProviders(sourceInputs) {
     accountId: sourceInputs.CLOUDFLARE_ACCOUNT_ID,
     zoneId: sourceInputs.CLOUDFLARE_ZONE_ID,
     apiToken: sourceInputs.CLOUDFLARE_API_TOKEN,
+    protectedPagesProject: sourceInputs.CLOUDFLARE_PAGES_PROJECT,
+    protectedSupabaseProjectRef: sourceInputs.SUPABASE_PROJECT_REF,
+    protectedSupabasePublishableKey: sourceInputs.SUPABASE_PUBLISHABLE_KEY,
+    protectedSupabaseSecretKey: sourceInputs.SUPABASE_SECRET_KEY,
     runCommand: runCaptured,
     workdir: process.cwd(),
   })
@@ -197,7 +325,7 @@ async function findProjectPair(supabase, sourceInputs, targetInputs = null) {
   return { projects, source, target }
 }
 
-function queryFor(supabase, project, inputs) {
+function queryFor(supabase, project, inputs, { readOnly = false } = {}) {
   return ({ projectRef: requestedRef, sql, operation }) => {
     if (requestedRef !== projectRef(project)) {
       throw new Error("数据库查询项目与已验证项目不匹配")
@@ -208,6 +336,7 @@ function queryFor(supabase, project, inputs) {
       databasePassword: inputs.SUPABASE_DB_PASSWORD,
       sql,
       operation,
+      readOnly,
     })
   }
 }
@@ -275,6 +404,11 @@ async function prepareStage() {
     region: projectRegion(target),
     databasePassword: targetInputs.SUPABASE_DB_PASSWORD,
   })
+  await queryFor(supabase, target, targetInputs)({
+    projectRef: targetInputs.SUPABASE_PROJECT_REF,
+    sql: buildTargetCloneInfrastructureSql(targetInputs.SUPABASE_PROJECT_REF),
+    operation: "初始化目标专用复制标记",
+  })
   const audit = await auditTarget({
     query: queryFor(supabase, target, targetInputs),
     targetRef: targetInputs.SUPABASE_PROJECT_REF,
@@ -283,7 +417,9 @@ async function prepareStage() {
   if (
     audit.items.length !== 0 ||
     audit.images.length !== 0 ||
+    audit.storageObjects.length !== 0 ||
     audit.authUsers.length !== 0 ||
+    audit.cloneImportMarker !== null ||
     audit.usedBytes !== 0 ||
     JSON.stringify(audit.projects.map((project) => project.slug)) !==
       JSON.stringify(expectedSeed)
@@ -295,6 +431,7 @@ async function prepareStage() {
 
 const RESET_TARGET_SQL = `begin;
 select pg_advisory_xact_lock(hashtextextended('task-roadmap-clone-v1', 0));
+delete from public.roadmap_clone_import_markers;
 delete from public.roadmap_item_images;
 delete from public.roadmap_status_history;
 delete from public.roadmap_items;
@@ -318,8 +455,67 @@ async function copyStage() {
     sourceInputs,
     targetInputs,
   )
-  const sourceQuery = queryFor(supabase, source, sourceInputs)
+  const sourceQuery = queryFor(supabase, source, sourceInputs, { readOnly: true })
   const targetQuery = queryFor(supabase, target, targetInputs)
+  const ambiguityReceipt = await readOptionalCopyReceipt(
+    TASK_AMBIGUITY_RECEIPT_FILE,
+  )
+  if (ambiguityReceipt) {
+    const git = await runCaptured("git", ["rev-parse", "HEAD"], {
+      cwd: process.cwd(),
+      operation: "读取待确认复制提交",
+    })
+    if (
+      ambiguityReceipt.sourceProjectRef !== sourceInputs.SUPABASE_PROJECT_REF ||
+      ambiguityReceipt.targetProjectRef !== targetInputs.SUPABASE_PROJECT_REF ||
+      ambiguityReceipt.appCommit !== git.stdout.trim()
+    ) {
+      throw new Error("待确认复制回执与当前源、目标或提交不匹配")
+    }
+    const audit = await auditTarget({
+      query: targetQuery,
+      targetRef: targetInputs.SUPABASE_PROJECT_REF,
+    })
+    if (
+      audit.cloneImportMarker?.manifestDigest ===
+        ambiguityReceipt.manifestDigest
+    ) {
+      const report = ensureSuccessReport(
+        await targetReadyReport({
+          supabase,
+          target,
+          targetInputs,
+          expectedAuthEmails: [],
+          copyReceipt: ambiguityReceipt,
+        }),
+      )
+      await writeReceiptAtomic(TASK_COPY_RECEIPT_FILE, ambiguityReceipt)
+      await removeReceipt(TASK_AMBIGUITY_RECEIPT_FILE)
+      return report
+    }
+    if (audit.cloneImportMarker !== null) {
+      throw new Error("目标数据库存在与待确认回执不一致的复制标记")
+    }
+    const actualPaths = audit.storageObjects.map((object) => object.name).sort()
+    const expectedPaths = ambiguityReceipt.objects
+      .map((object) => object.storagePath)
+      .sort()
+    if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+      throw new Error("待确认复制对象集合不一致，拒绝自动清理")
+    }
+    await removeCopiedObjects({
+      paths: expectedPaths,
+      target: {
+        url: targetInputs.SUPABASE_URL,
+        secretKey: targetInputs.SUPABASE_SECRET_KEY,
+      },
+      protectedSource: {
+        url: sourceInputs.SUPABASE_URL,
+        secretKey: sourceInputs.SUPABASE_SECRET_KEY,
+      },
+    })
+    await removeReceipt(TASK_AMBIGUITY_RECEIPT_FILE)
+  }
   return copyTarget({
     captureSnapshot: () =>
       captureSourceSnapshot({
@@ -333,6 +529,7 @@ async function copyStage() {
           url: sourceInputs.SUPABASE_URL,
           secretKey: sourceInputs.SUPABASE_SECRET_KEY,
         },
+        expectedProjectRef: sourceInputs.SUPABASE_PROJECT_REF,
       }),
     assertFreshTarget: async () => {
       const audit = await auditTarget({
@@ -342,7 +539,9 @@ async function copyStage() {
       if (
         audit.items.length !== 0 ||
         audit.images.length !== 0 ||
+        audit.storageObjects.length !== 0 ||
         audit.authUsers.length !== 0 ||
+        audit.cloneImportMarker !== null ||
         Object.values(audit.operationalCounts).some((count) => count !== 0)
       ) {
         throw new Error("目标项目已包含数据，拒绝再次复制")
@@ -361,13 +560,43 @@ async function copyStage() {
         },
       })
     },
-    importData: (manifest) =>
+    prepareImport: async (manifest) => {
+      const git = await runCaptured("git", ["rev-parse", "HEAD"], {
+        cwd: process.cwd(),
+        operation: "读取复制提交",
+      })
+      return createCopyReceipt({
+        manifest,
+        targetProjectRef: targetInputs.SUPABASE_PROJECT_REF,
+        appCommit: git.stdout.trim(),
+      })
+    },
+    importData: (manifest, receipt) =>
       importSnapshot({
         query: targetQuery,
         targetRef: targetInputs.SUPABASE_PROJECT_REF,
         manifest,
+        receipt,
       }),
-    audit: async (manifest) => {
+    confirmImport: async (receipt) => {
+      try {
+        const audit = await auditTarget({
+          query: targetQuery,
+          targetRef: targetInputs.SUPABASE_PROJECT_REF,
+        })
+        return (
+          audit.cloneImportMarker?.manifestDigest === receipt?.manifestDigest &&
+          audit.cloneImportMarker?.targetProjectRef === receipt?.targetProjectRef
+            ? "committed"
+            : audit.cloneImportMarker === null
+              ? "rolled-back"
+              : "unknown"
+        )
+      } catch {
+        return "unknown"
+      }
+    },
+    audit: async (manifest, receipt) => {
       const audit = await auditTarget({
         query: targetQuery,
         targetRef: targetInputs.SUPABASE_PROJECT_REF,
@@ -378,12 +607,20 @@ async function copyStage() {
           url: targetInputs.SUPABASE_URL,
           secretKey: targetInputs.SUPABASE_SECRET_KEY,
         },
+        expectedProjectRef: targetInputs.SUPABASE_PROJECT_REF,
       })
       audit.objectHashes = Object.fromEntries(
         targetHashed.images.map((image) => [image.storagePath, image.sha256]),
       )
-      return reconcileSnapshot(manifest, audit, { expectedAuthUsers: 0 })
+      return reconcileSnapshot(manifest, audit, {
+        expectedAuthUsers: 0,
+        copyReceipt: receipt,
+      })
     },
+    persistCopyReceipt: (receipt) =>
+      writeReceiptAtomic(TASK_COPY_RECEIPT_FILE, receipt),
+    persistAmbiguityReceipt: (receipt) =>
+      writeReceiptAtomic(TASK_AMBIGUITY_RECEIPT_FILE, receipt),
     cleanupImportedData: () =>
       targetQuery({
         projectRef: targetInputs.SUPABASE_PROJECT_REF,
@@ -397,29 +634,101 @@ async function copyStage() {
           url: targetInputs.SUPABASE_URL,
           secretKey: targetInputs.SUPABASE_SECRET_KEY,
         },
+        protectedSource: {
+          url: sourceInputs.SUPABASE_URL,
+          secretKey: sourceInputs.SUPABASE_SECRET_KEY,
+        },
       }),
   })
 }
 
-async function targetReadyReport({ supabase, target, targetInputs, expectedAuthEmails }) {
+async function targetReadyReport({
+  supabase,
+  target,
+  targetInputs,
+  expectedAuthEmails,
+  copyReceipt,
+}) {
   const targetQuery = queryFor(supabase, target, targetInputs)
   const audit = await auditTarget({
     query: targetQuery,
     targetRef: targetInputs.SUPABASE_PROJECT_REF,
   })
-  await hydrateImageHashes({
+  const targetHashed = await hydrateImageHashes({
     manifest: { images: audit.images },
     source: {
       url: targetInputs.SUPABASE_URL,
       secretKey: targetInputs.SUPABASE_SECRET_KEY,
     },
+    expectedProjectRef: targetInputs.SUPABASE_PROJECT_REF,
   })
-  return validateTargetReadyAudit(audit, { expectedAuthEmails })
+  const report = validateTargetReadyAudit(audit, { expectedAuthEmails })
+  const add = (condition, message) => {
+    if (!condition) report.differences.push(message)
+  }
+  add(
+    audit.cloneImportMarker?.sourceProjectRef === copyReceipt.sourceProjectRef &&
+      audit.cloneImportMarker?.targetProjectRef === copyReceipt.targetProjectRef &&
+      audit.cloneImportMarker?.manifestDigest === copyReceipt.manifestDigest &&
+      audit.cloneImportMarker?.objectDigest === copyReceipt.objectDigest &&
+      audit.cloneImportMarker?.appCommit === copyReceipt.appCommit &&
+      new Date(audit.cloneImportMarker?.capturedAt).toISOString() ===
+        new Date(copyReceipt.capturedAt).toISOString() &&
+      ["projects", "items", "histories", "images"].every(
+        (field) =>
+          Number(audit.cloneImportMarker?.counts?.[field]) ===
+          copyReceipt.counts[field],
+      ) &&
+      ["projects", "items", "histories", "images", "objects"].every(
+        (field) =>
+          audit.cloneImportMarker?.datasetDigests?.[field] ===
+          copyReceipt.datasetDigests[field],
+      ),
+    "数据库复制标记与本机回执不一致",
+  )
+  add(
+    objectDigest(targetHashed.images) === copyReceipt.objectDigest,
+    "目标图片对象内容与复制回执不一致",
+  )
+  const objectHashes = Object.fromEntries(
+    targetHashed.images.map((image) => [image.storagePath, image.sha256]),
+  )
+  const currentDigests = datasetDigests({
+    ...audit,
+    images: targetHashed.images,
+  }, objectHashes)
+  add(
+    ["projects", "items", "histories", "images", "objects"].every(
+      (field) => currentDigests[field] === copyReceipt.datasetDigests[field],
+    ),
+    "目标关系数据或对象摘要与复制回执不一致",
+  )
+  add(
+    audit.projects.length === copyReceipt.counts.projects &&
+      audit.items.length === copyReceipt.counts.items &&
+      audit.histories.length === copyReceipt.counts.histories &&
+      audit.images.length === copyReceipt.counts.images,
+    "目标数据数量与复制回执不一致",
+  )
+  report.ok = report.differences.length === 0
+  return report
 }
 
 async function deployStage() {
   const sourceInputs = await loadSourceInputs()
   const targetInputs = await readTaskInputs(TASK_DEPLOYMENT_INPUTS_FILE)
+  assertTaskIdentity(sourceInputs, targetInputs)
+  const copyReceipt = await readCopyReceipt(TASK_COPY_RECEIPT_FILE)
+  const git = await runCaptured("git", ["rev-parse", "HEAD"], {
+    cwd: process.cwd(),
+    operation: "读取部署提交",
+  })
+  validateStageReceipts("deploy", {
+    sourceRef: sourceInputs.SUPABASE_PROJECT_REF,
+    targetRef: targetInputs.SUPABASE_PROJECT_REF,
+    commit: git.stdout.trim(),
+    copyReceipt,
+  })
   const { supabase, cloudflare } = await loadProviders(sourceInputs)
   const { target } = await findProjectPair(supabase, sourceInputs, targetInputs)
 
@@ -431,25 +740,16 @@ async function deployStage() {
           target,
           targetInputs,
           expectedAuthEmails: [],
+          copyReceipt,
         }),
       ),
     configureAuth: async () => {
-      const users = await supabase.listAuthUsers({
-        projectUrl: targetInputs.SUPABASE_URL,
-        secretKey: targetInputs.SUPABASE_SECRET_KEY,
-      })
-      const existingAdmin =
-        users.length === 1 && users[0].email === targetInputs.ADMIN_EMAIL
-      if (users.length > 0 && !existingAdmin) {
-        throw new Error("目标 Auth 已存在非预期用户")
-      }
       await supabase.configureAuth({
         projectRef: targetInputs.SUPABASE_PROJECT_REF,
         projectUrl: targetInputs.SUPABASE_URL,
         secretKey: targetInputs.SUPABASE_SECRET_KEY,
         adminEmail: targetInputs.ADMIN_EMAIL,
         adminPassword: targetInputs.ADMIN_PASSWORD,
-        createAdmin: !existingAdmin,
       })
     },
     deployEdge: async () => {
@@ -466,16 +766,13 @@ async function deployStage() {
         publishableKey: targetInputs.SUPABASE_PUBLISHABLE_KEY,
         secretKey: targetInputs.SUPABASE_SECRET_KEY,
       })
-      const git = await runCaptured("git", ["rev-parse", "HEAD"], {
-        cwd: process.cwd(),
-        operation: "读取部署提交",
-      })
       await cloudflare.deployPages({
         buildEnv: {
           NEXT_PUBLIC_SUPABASE_URL: targetInputs.SUPABASE_URL,
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
             targetInputs.SUPABASE_PUBLISHABLE_KEY,
           NEXT_PUBLIC_ADMIN_EMAIL: targetInputs.ADMIN_EMAIL,
+          NEXT_PUBLIC_DEPLOY_COMMIT: git.stdout.trim(),
         },
         commitHash: git.stdout.trim(),
       })
@@ -486,20 +783,43 @@ async function deployStage() {
         target,
         targetInputs,
         expectedAuthEmails: [TASK_ADMIN_EMAIL],
+        copyReceipt,
       }),
   })
 }
 
 async function domainStage() {
   const sourceInputs = await loadSourceInputs()
-  const { cloudflare } = await loadProviders(sourceInputs)
+  const targetInputs = await readTaskInputs(TASK_DEPLOYMENT_INPUTS_FILE)
+  assertTaskIdentity(sourceInputs, targetInputs)
+  const [copyReceipt, smokeReceipt] = await Promise.all([
+    readCopyReceipt(TASK_COPY_RECEIPT_FILE),
+    readSmokeReceipt(TASK_SMOKE_RECEIPT_FILE),
+  ])
+  const git = await runCaptured("git", ["rev-parse", "HEAD"], {
+    cwd: process.cwd(),
+    operation: "读取域名绑定提交",
+  })
+  validateStageReceipts("domain", {
+    sourceRef: sourceInputs.SUPABASE_PROJECT_REF,
+    targetRef: targetInputs.SUPABASE_PROJECT_REF,
+    commit: git.stdout.trim(),
+    copyReceipt,
+    smokeReceipt,
+  })
+  const { supabase, cloudflare } = await loadProviders(sourceInputs)
+  const { target } = await findProjectPair(supabase, sourceInputs, targetInputs)
+  ensureSuccessReport(
+    await targetReadyReport({
+      supabase,
+      target,
+      targetInputs,
+      expectedAuthEmails: [TASK_ADMIN_EMAIL],
+      copyReceipt,
+    }),
+  )
   await domainTarget({
-    assertStableSmoke: async () => {
-      for (const path of ["/", "/admin/"]) {
-        const response = await fetch(`https://${TASK_PAGES_PROJECT}.pages.dev${path}`)
-        if (!response.ok) throw new Error("稳定 Pages 域名尚未通过基础检查")
-      }
-    },
+    assertStableSmoke: async () => {},
     bindDomain: () => cloudflare.bindDomain(),
   })
   for (let attempt = 0; attempt < 60; attempt += 1) {
@@ -520,17 +840,45 @@ async function statusStage() {
   if (errors.length > 0) throw new Error(`目标部署配置无效（${errors.length} 项）`)
   const { supabase } = await loadProviders(sourceInputs)
   const { target } = await findProjectPair(supabase, sourceInputs, targetInputs)
-  const audit = await auditTarget({
-    query: queryFor(supabase, target, targetInputs),
-    targetRef: targetInputs.SUPABASE_PROJECT_REF,
+  const [copyReceipt, smokeReceipt] = await Promise.all([
+    readCopyReceipt(TASK_COPY_RECEIPT_FILE),
+    readSmokeReceipt(TASK_SMOKE_RECEIPT_FILE),
+  ])
+  const git = await runCaptured("git", ["rev-parse", "HEAD"], {
+    cwd: process.cwd(),
+    operation: "读取核对提交",
   })
+  validateStageReceipts("status", {
+    sourceRef: sourceInputs.SUPABASE_PROJECT_REF,
+    targetRef: targetInputs.SUPABASE_PROJECT_REF,
+    commit: git.stdout.trim(),
+    copyReceipt,
+    smokeReceipt,
+  })
+  const report = ensureSuccessReport(
+    await targetReadyReport({
+      supabase,
+      target,
+      targetInputs,
+      expectedAuthEmails: [TASK_ADMIN_EMAIL],
+      copyReceipt,
+    }),
+  )
+  const authConfig = await supabase.getAuthConfig(targetInputs.SUPABASE_PROJECT_REF)
+  if (
+    authConfig?.disable_signup !== true ||
+    authConfig?.site_url !== `https://${TASK_DOMAIN}`
+  ) {
+    throw new Error("目标 Auth 配置未达到上线状态")
+  }
   return {
     targetRef: targetInputs.SUPABASE_PROJECT_REF,
-    projects: audit.projects.length,
-    items: audit.items.length,
-    histories: audit.histories.length,
-    images: audit.images.length,
-    authUsers: audit.authUsers.length,
+    projects: report.counts?.projects ?? copyReceipt.counts.projects,
+    items: report.counts?.items ?? copyReceipt.counts.items,
+    histories: report.counts?.histories ?? copyReceipt.counts.histories,
+    images: report.counts?.images ?? copyReceipt.counts.images,
+    authUsers: 1,
+    ready: true,
   }
 }
 

@@ -18,6 +18,10 @@ const fontMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Roadmap 路线图",
   description: "查看项目进展、提交建议并为重要需求投票。",
+  other: {
+    "roadmap-deploy-commit":
+      process.env.NEXT_PUBLIC_DEPLOY_COMMIT ?? "development",
+  },
 }
 
 export default function RootLayout({

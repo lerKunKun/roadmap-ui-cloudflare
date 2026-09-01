@@ -110,8 +110,26 @@ export function validateTaskIdentity(source, target) {
   if (target.VOTE_IP_SALT === source.VOTE_IP_SALT) {
     errors.push("VOTE_IP_SALT：必须与源实例不同")
   }
+  for (const field of [
+    "SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SECRET_KEY",
+    "SUPABASE_DB_PASSWORD",
+    "ADMIN_PASSWORD",
+  ]) {
+    if (source[field] && target[field] === source[field]) {
+      errors.push(`${field}：必须与源实例不同`)
+    }
+  }
 
   return errors
+}
+
+export function assertTaskIdentity(source, target) {
+  const errors = validateTaskIdentity(source, target)
+  if (errors.length > 0) {
+    throw new Error(`目标部署配置无效（${errors.length} 项）：${errors.join("；")}`)
+  }
+  return target
 }
 
 function serializeTaskInputs(values) {

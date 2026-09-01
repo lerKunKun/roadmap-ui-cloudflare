@@ -1,12 +1,43 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 const SUPABASE_API = "https://api.supabase.com/v1"
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4"
 const TARGET_DOMAIN = "task.telljax.com"
 const TARGET_PAGES_PROJECT = "task-roadmap-ui"
-const NPX = process.platform === "win32" ? "npx.cmd" : "npx"
+
+export function resolveNpxInvocation(args, runtime = {}) {
+  const platform = runtime.platform ?? process.platform
+  if (platform !== "win32") return { program: "npx", args: [...args] }
+  const execPath = runtime.execPath ?? process.execPath
+  const npmExecPath = runtime.npmExecPath ?? process.env.npm_execpath
+  const npxCliPath = npmExecPath
+    ? join(dirname(npmExecPath), "npx-cli.js")
+    : join(dirname(execPath), "node_modules", "npm", "bin", "npx-cli.js")
+  return { program: execPath, args: [npxCliPath, ...args] }
+}
+
+export function resolveNpmInvocation(args, runtime = {}) {
+  const platform = runtime.platform ?? process.platform
+  if (platform !== "win32") return { program: "npm", args: [...args] }
+  const execPath = runtime.execPath ?? process.execPath
+  const npmExecPath =
+    runtime.npmExecPath ??
+    process.env.npm_execpath ??
+    join(dirname(execPath), "node_modules", "npm", "bin", "npm-cli.js")
+  return { program: execPath, args: [npmExecPath, ...args] }
+}
+
+function runNpx(runCommand, args, options) {
+  const invocation = resolveNpxInvocation(args)
+  return runCommand(invocation.program, invocation.args, options)
+}
+
+function runNpm(runCommand, args, options) {
+  const invocation = resolveNpmInvocation(args)
+  return runCommand(invocation.program, invocation.args, options)
+}
 
 class ProviderError extends Error {
   constructor(code, message) {
@@ -61,6 +92,8 @@ function databaseUrl({ projectRef, region, databasePassword }) {
 
 export function createSupabaseProvider({
   accessToken,
+  protectedProjectRef = /** @type {string | null} */ (null),
+  protectedSecretKey = /** @type {string | null} */ (null),
   runCommand,
   fetchImpl = fetch,
   workdir = process.cwd(),
@@ -72,9 +105,30 @@ export function createSupabaseProvider({
     "User-Agent": "task-roadmap-clone/1.0",
   }
 
+  function assertMutableProject(projectRef) {
+    if (protectedProjectRef && projectRef === protectedProjectRef) {
+      throw new Error("拒绝修改源 Supabase 项目")
+    }
+  }
+
+  function assertProtectedReadOnly(projectRef, sql, readOnly) {
+    if (!protectedProjectRef || projectRef !== protectedProjectRef) return
+    if (
+      readOnly !== true ||
+      !/^\s*begin\s+transaction\s+isolation\s+level\s+repeatable\s+read\s+read\s+only\s*;/i.test(
+        sql,
+      ) ||
+      /\b(insert|update|delete|truncate|drop|alter|create|grant|revoke|call|do)\b/i.test(
+        sql,
+      )
+    ) {
+      throw new Error("拒绝修改源 Supabase 项目")
+    }
+  }
+
   async function listProjects() {
-    const result = await runCommand(
-      NPX,
+    const result = await runNpx(
+      runCommand,
       ["supabase", "projects", "list", "--output-format", "json"],
       { cwd: workdir, env: commandEnv, operation: "读取 Supabase 项目列表" },
     )
@@ -85,8 +139,8 @@ export function createSupabaseProvider({
   }
 
   async function createProject({ name, organizationId, region, databasePassword }) {
-    const result = await runCommand(
-      NPX,
+    const result = await runNpx(
+      runCommand,
       [
         "supabase",
         "projects",
@@ -131,8 +185,8 @@ export function createSupabaseProvider({
   }
 
   async function getApiKeys(projectRef) {
-    const result = await runCommand(
-      NPX,
+    const result = await runNpx(
+      runCommand,
       [
         "supabase",
         "projects",
@@ -171,10 +225,13 @@ export function createSupabaseProvider({
     databasePassword,
     sql,
     operation,
+    readOnly = false,
   }) {
+    assertProtectedReadOnly(projectRef, sql, readOnly)
+    if (!readOnly) assertMutableProject(projectRef)
     return withTemporaryFile("task-roadmap-sql", sql, (path) =>
-      runCommand(
-        NPX,
+      runNpx(
+        runCommand,
         [
           "supabase",
           "db",
@@ -192,6 +249,7 @@ export function createSupabaseProvider({
   }
 
   async function applyMigrations({ projectRef, region, databasePassword, dryRun = false }) {
+    assertMutableProject(projectRef)
     const args = [
       "supabase",
       "db",
@@ -201,7 +259,7 @@ export function createSupabaseProvider({
     ]
     if (dryRun) args.push("--dry-run")
     else args.push("--yes")
-    return runCommand(NPX, args, {
+    return runNpx(runCommand, args, {
       cwd: workdir,
       env: commandEnv,
       operation: dryRun ? "预检目标数据库迁移" : "应用目标数据库迁移",
@@ -214,8 +272,15 @@ export function createSupabaseProvider({
     secretKey,
     adminEmail,
     adminPassword,
-    createAdmin = true,
   }) {
+    assertMutableProject(projectRef)
+    const expectedProjectUrl = `https://${projectRef}.supabase.co`
+    if (projectUrl !== expectedProjectUrl) {
+      throw new Error("Auth URL 与目标项目不匹配")
+    }
+    if (protectedSecretKey && secretKey === protectedSecretKey) {
+      throw new Error("拒绝使用源 Supabase Secret 修改目标 Auth")
+    }
     const configResponse = await fetchImpl(
       `${SUPABASE_API}/projects/${projectRef}/config/auth`,
       {
@@ -230,23 +295,66 @@ export function createSupabaseProvider({
     )
     await responseJson(configResponse, "Supabase")
 
-    if (!createAdmin) return { configured: true }
+    const verifiedConfig = await getAuthConfig(projectRef)
+    if (
+      verifiedConfig?.disable_signup !== true ||
+      verifiedConfig?.site_url !== `https://${TARGET_DOMAIN}`
+    ) {
+      throw new Error("目标 Auth 配置回读不一致")
+    }
 
-    const adminResponse = await fetchImpl(`${projectUrl}/auth/v1/admin/users`, {
-      method: "POST",
+    const users = await listAuthUsers({ projectUrl, secretKey })
+    if (users.length > 1 || (users.length === 1 && users[0].email !== adminEmail)) {
+      throw new Error("目标 Auth 已存在非预期用户")
+    }
+    const existing = users[0]
+    const adminUrl = existing
+      ? `${projectUrl}/auth/v1/admin/users/${encodeURIComponent(existing.id)}`
+      : `${projectUrl}/auth/v1/admin/users`
+    const adminResponse = await fetchImpl(adminUrl, {
+      method: existing ? "PUT" : "POST",
       headers: {
         apikey: secretKey,
         Authorization: `Bearer ${secretKey}`,
         "content-type": "application/json",
         "User-Agent": "task-roadmap-clone/1.0",
       },
-      body: JSON.stringify({
-        email: adminEmail,
-        password: adminPassword,
-        email_confirm: true,
-      }),
+      body: JSON.stringify(
+        existing
+          ? { password: adminPassword, email_confirm: true }
+          : {
+              email: adminEmail,
+              password: adminPassword,
+              email_confirm: true,
+            },
+      ),
     })
-    return responseJson(adminResponse, "Supabase")
+    await responseJson(adminResponse, "Supabase")
+
+    const loginResponse = await fetchImpl(
+      `${projectUrl}/auth/v1/token?grant_type=password`,
+      {
+        method: "POST",
+        headers: {
+          apikey: secretKey,
+          "content-type": "application/json",
+          "User-Agent": "task-roadmap-clone/1.0",
+        },
+        body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+      },
+    )
+    const login = await responseJson(loginResponse, "Supabase")
+    if (!login?.access_token) throw new Error("目标管理员密码验证失败")
+    return { configured: true, adminId: existing?.id ?? null }
+  }
+
+  async function getAuthConfig(projectRef) {
+    return responseJson(
+      await fetchImpl(`${SUPABASE_API}/projects/${projectRef}/config/auth`, {
+        headers: managementHeaders,
+      }),
+      "Supabase",
+    )
   }
 
   async function listAuthUsers({ projectUrl, secretKey }) {
@@ -265,10 +373,11 @@ export function createSupabaseProvider({
   }
 
   async function setEdgeSecrets({ projectRef, voteIpSalt }) {
+    assertMutableProject(projectRef)
     const contents = `VOTE_IP_SALT=${JSON.stringify(voteIpSalt)}\nALLOWED_ORIGINS=${JSON.stringify(`https://${TARGET_DOMAIN},https://${TARGET_PAGES_PROJECT}.pages.dev`)}\n`
     return withTemporaryFile("task-roadmap-secrets", contents, (path) =>
-      runCommand(
-        NPX,
+      runNpx(
+        runCommand,
         ["supabase", "secrets", "set", "--env-file", path, "--project-ref", projectRef],
         { cwd: workdir, env: commandEnv, operation: "设置目标 Edge Function Secrets" },
       ),
@@ -276,9 +385,10 @@ export function createSupabaseProvider({
   }
 
   async function deployEdgeFunctions(projectRef) {
+    assertMutableProject(projectRef)
     for (const functionName of ["submit-suggestion", "vote"]) {
-      await runCommand(
-        NPX,
+      await runNpx(
+        runCommand,
         [
           "supabase",
           "functions",
@@ -304,6 +414,7 @@ export function createSupabaseProvider({
     queryDatabase,
     applyMigrations,
     configureAuth,
+    getAuthConfig,
     listAuthUsers,
     setEdgeSecrets,
     deployEdgeFunctions,
@@ -314,6 +425,10 @@ export function createCloudflareProvider({
   accountId,
   zoneId,
   apiToken,
+  protectedPagesProject = /** @type {string | null} */ (null),
+  protectedSupabaseProjectRef = /** @type {string | null} */ (null),
+  protectedSupabasePublishableKey = /** @type {string | null} */ (null),
+  protectedSupabaseSecretKey = /** @type {string | null} */ (null),
   runCommand,
   fetchImpl = fetch,
   workdir = process.cwd(),
@@ -324,6 +439,13 @@ export function createCloudflareProvider({
     "User-Agent": "task-roadmap-clone/1.0",
   }
   const projectBase = `${CLOUDFLARE_API}/accounts/${accountId}/pages/projects`
+  let configuredTargetRef = null
+
+  function assertMutableTarget() {
+    if (protectedPagesProject === TARGET_PAGES_PROJECT) {
+      throw new Error("拒绝修改源 Cloudflare Pages 项目")
+    }
+  }
 
   async function request(path, options = {}, allowNotFound = false) {
     return responseJson(
@@ -337,6 +459,7 @@ export function createCloudflareProvider({
   }
 
   async function ensurePagesProject() {
+    assertMutableTarget()
     const existing = await responseJson(
       await fetchImpl(`${projectBase}/${TARGET_PAGES_PROJECT}`, { headers }),
       "Cloudflare",
@@ -362,6 +485,32 @@ export function createCloudflareProvider({
   }
 
   async function configureRuntime({ supabaseUrl, publishableKey, secretKey }) {
+    assertMutableTarget()
+    const targetUrl = new URL(supabaseUrl)
+    const targetMatch = /^([a-z0-9]{20})\.supabase\.co$/.exec(
+      targetUrl.hostname,
+    )
+    if (
+      targetUrl.protocol !== "https:" ||
+      targetUrl.pathname !== "/" ||
+      !targetMatch
+    ) {
+      throw new Error("目标 Pages Supabase URL 无效")
+    }
+    if (
+      protectedSupabaseProjectRef &&
+      new URL(supabaseUrl).hostname === `${protectedSupabaseProjectRef}.supabase.co`
+    ) {
+      throw new Error("拒绝将源 Supabase 绑定到目标 Pages")
+    }
+    if (
+      (protectedSupabasePublishableKey &&
+        publishableKey === protectedSupabasePublishableKey) ||
+      (protectedSupabaseSecretKey && secretKey === protectedSupabaseSecretKey)
+    ) {
+      throw new Error("拒绝将源 Supabase 凭据绑定到目标 Pages")
+    }
+    configuredTargetRef = targetMatch[1]
     const envVars = {
       SUPABASE_URL: { type: "plain_text", value: supabaseUrl },
       SUPABASE_PUBLISHABLE_KEY: { type: "plain_text", value: publishableKey },
@@ -383,13 +532,35 @@ export function createCloudflareProvider({
   }
 
   async function deployPages({ buildEnv, commitHash }) {
-    await runCommand(NPX, ["run", "build"], {
+    assertMutableTarget()
+    if (
+      protectedSupabaseProjectRef &&
+      buildEnv?.NEXT_PUBLIC_SUPABASE_URL ===
+        `https://${protectedSupabaseProjectRef}.supabase.co`
+    ) {
+      throw new Error("拒绝使用源 Supabase 构建目标 Pages")
+    }
+    if (
+      protectedSupabasePublishableKey &&
+      buildEnv?.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ===
+        protectedSupabasePublishableKey
+    ) {
+      throw new Error("拒绝使用源 Supabase 凭据构建目标 Pages")
+    }
+    if (
+      !configuredTargetRef ||
+      buildEnv?.NEXT_PUBLIC_SUPABASE_URL !==
+        `https://${configuredTargetRef}.supabase.co`
+    ) {
+      throw new Error("目标 Pages 构建配置与运行时 Supabase 不匹配")
+    }
+    await runNpm(runCommand, ["run", "build"], {
       cwd: workdir,
       env: { ...process.env, ...buildEnv },
       operation: "构建 Task Roadmap",
     })
-    return runCommand(
-      NPX,
+    return runNpx(
+      runCommand,
       [
         "wrangler",
         "pages",
@@ -412,9 +583,18 @@ export function createCloudflareProvider({
   }
 
   async function bindDomain() {
+    assertMutableTarget()
     const query = new URLSearchParams({ "name.exact": TARGET_DOMAIN })
     const records = await request(`/zones/${zoneId}/dns_records?${query}`)
-    if (records.length > 0) {
+    const expectedTarget = `${TARGET_PAGES_PROJECT}.pages.dev`
+    const recordsMatchTarget = records.every(
+      (record) =>
+        record.name === TARGET_DOMAIN &&
+        record.type === "CNAME" &&
+        record.content?.replace(/\.$/, "") === expectedTarget &&
+        record.proxied === true,
+    )
+    if (records.length > 0 && !recordsMatchTarget) {
       throw new ProviderError("DOMAIN_CONFLICT", "task.telljax.com 已存在 DNS 记录")
     }
 

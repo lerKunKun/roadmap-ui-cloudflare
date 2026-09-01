@@ -237,3 +237,79 @@ Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码
 - 数据库迁移：生产迁移只向前执行；确需移除数据结构时先备份，再编写并单独审核显式逆向迁移，不要直接重置生产数据库。
 - Supabase Free 项目低活跃约一周可能被自动暂停；收到预警后访问 Dashboard 或让应用产生正常数据库请求。暂停后可在 Dashboard 点击 Resume project，官方当前说明恢复窗口最长为一年。
 - 当前 Free Plan 包含两个活跃免费项目及一定的数据库、流量和 Edge Function 调用额度；超额或需要避免休眠时再升级，不需要购买钉钉 API。
+
+## 6. Task Roadmap 独立实例
+
+`Task Roadmap` 与当前 `telljax.com` 使用同一份 `master` 代码，但运行资源完全隔离：
+
+| 项目 | 地址或名称 |
+| --- | --- |
+| 用户端 | `https://task.telljax.com/` |
+| 管理端 | `https://task.telljax.com/admin/` |
+| Cloudflare Pages | `task-roadmap-ui` |
+| Supabase | `task-roadmap` |
+
+目标实例拥有独立数据库、Auth 用户、私有 `roadmap-images` Bucket、Edge Functions、数据库密码、管理员密码和 `VOTE_IP_SALT`。两个实例上线后不进行实时或定时同步。
+
+### 6.1 本机配置
+
+源实例继续读取 `.env.deploy.local`。自动准备目标项目后会原子生成 `.env.task.deploy.local`，其中只保存目标项目运行所需值；Supabase Access Token 与 Cloudflare API Token 继续从源部署文件临时读取，不复制到目标文件。
+
+两个文件都匹配仓库的 `.env*` 忽略规则，不能提交、上传或粘贴到日志。检查过程只输出字段名、数量和布尔结果，不输出密码、Token、Secret Key 或盐值。
+
+### 6.2 一次性复制范围
+
+复制以下快照数据：
+
+- 项目、项目网址、Roadmap 条目及 UUID、状态、排序和时间戳；
+- 状态时间轴；
+- 建议图片元数据及其引用的私有 Storage 对象；
+- 当前公开票数，写入目标条目的 `vote_baseline`。
+
+不复制 `votes`、`suggestion_rate_limits`、`suggestion_image_rate_limits`、任何 IP 哈希、源 Auth 用户、会话、密码、密钥或源 `VOTE_IP_SALT`。目标 `votes` 从空表开始，新投票在历史票数基线上继续累加。
+
+### 6.3 自动化命令与顺序
+
+所有命令在仓库根目录执行：
+
+```powershell
+npm run deploy:task:prepare
+npm run deploy:task:copy
+npm run deploy:task:deploy
+npm run deploy:task:smoke -- --base-url https://task-roadmap-ui.pages.dev
+npm run deploy:task:domain
+npm run deploy:task:smoke -- --base-url https://task.telljax.com
+npm run deploy:task:check
+```
+
+- `prepare` 创建目标 Supabase、生成独立强凭据、应用全部共享迁移，再通过受 Ref 保护的目标专用 SQL 初始化复制标记并确认私有 Bucket 为空；复制标记不进入共享 migration，因此不会在源项目出现。
+- `copy` 使用只读可重复读事务抓取源快照，校验图片 MIME、字节数和 SHA-256，拒绝覆盖目标对象，在目标事务中导入并逐字段对账。数据库事务内标记与本机无密钥回执会共同绑定源/目标 Ref、对象摘要和 Git 提交；成功后不能再次运行，两个实例从此独立变化。
+- `deploy` 创建或复用唯一目标管理员，关闭公开注册，设置目标 Edge Secrets，部署两个 Edge Functions，创建 Pages 项目，同时配置 Production/Preview 运行时变量并发布当前提交。
+- 第一次 `smoke` 在稳定 `pages.dev` 域名验证公开读取、管理员登录、文字/图片建议、图片审核、缓存 MISS/HIT、同 IP 重复投票和清理。浏览器只能访问目标 Supabase 主机；任何源或第三方 Supabase 主机会立即中止测试。
+- `domain` 先检查同名 DNS 与其他 Pages 绑定；有冲突时不修改任何记录。无冲突时添加 Pages Custom Domain 并等待证书为 `active`。
+- 第二次 `smoke` 验证最终域名。每次冒烟都使用预先分配的唯一前缀，在 `finally` 中按 Storage 对象优先的顺序清理，精确恢复冒烟前的票数与限流运行态，并再次核对源计数。
+- 最后的 `check` 要求复制回执、数据库事务标记、图片对象摘要、管理员、关闭注册配置、最终冒烟回执和当前 Git 提交全部一致；只返回就绪状态与数量，不输出任何凭据。
+
+Edge Functions 的目标 Origin 必须保持：
+
+```text
+https://task.telljax.com,https://task-roadmap-ui.pages.dev
+```
+
+管理端与用户端共用 `task.telljax.com`，不创建额外管理子域名或重定向规则。
+
+### 6.4 域名与 DNS
+
+域名由 Cloudflare Pages Custom Domain 流程绑定。自动化会先精确查询 `task.telljax.com` 的 DNS 记录；若不存在冲突，Pages 在同一 Cloudflare Zone 中创建所需代理记录。不要提前手工添加指向其他源站的 A、AAAA 或 CNAME。
+
+若必须人工核对，最终逻辑目标应是：
+
+| 类型 | 名称 | 目标 | 代理 |
+| --- | --- | --- | --- |
+| CNAME | `task` | `task-roadmap-ui.pages.dev` | 已代理 |
+
+### 6.5 回滚与恢复
+
+在稳定 `pages.dev` 冒烟通过前不绑定 `task.telljax.com`。若目标 Pages 或 Edge Function 异常，只回滚 `task-roadmap-ui` 的部署；若一次性导入失败，自动化会清理本次目标对象并恢复未开放的目标数据，不操作源项目。
+
+域名开放后发现问题时，先从 `task-roadmap-ui` 移除或暂停 `task.telljax.com`，保留目标 Supabase 供排查。不得删除、重置或迁移源 `telljax.com` 的数据库、Pages 项目或管理员。目标管理员密码仅保存在本机 `.env.task.deploy.local`，最终交付时只输出一次。

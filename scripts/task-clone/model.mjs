@@ -237,7 +237,11 @@ function sameRows(left, right) {
   return JSON.stringify(stableRows(left)) === JSON.stringify(stableRows(right))
 }
 
-export function reconcileSnapshot(manifestInput, audit, { expectedAuthUsers }) {
+export function reconcileSnapshot(
+  manifestInput,
+  audit,
+  { expectedAuthUsers, copyReceipt = null },
+) {
   const manifest = parseCloneManifest(manifestInput)
   const differences = []
   const add = (condition, message) => {
@@ -317,6 +321,17 @@ export function reconcileSnapshot(manifestInput, audit, { expectedAuthUsers }) {
     ) && Object.keys(audit.objectHashes ?? {}).length === manifest.images.length,
     "图片对象哈希不一致",
   )
+  const expectedObjects = manifest.images.map((image) => ({
+    name: image.storagePath,
+    sizeBytes: Number(image.sizeBytes),
+    mimeType: image.mimeType,
+  }))
+  const actualObjects = (audit.storageObjects ?? []).map((object) => ({
+    name: object.name,
+    sizeBytes: Number(object.sizeBytes),
+    mimeType: object.mimeType,
+  }))
+  add(sameRows(expectedObjects, actualObjects), "图片对象路径不一致")
 
   const expectedBytes = manifest.images.reduce(
     (total, image) => total + image.sizeBytes,
@@ -350,6 +365,25 @@ export function reconcileSnapshot(manifestInput, audit, { expectedAuthUsers }) {
       ? actualEmails.length === expectedAuthUsers
       : JSON.stringify(actualEmails) === JSON.stringify(expectedEmails)
   add(authMatches, "目标 Auth 用户不符合预期")
+  if (copyReceipt) {
+    const marker = audit.cloneImportMarker
+    add(
+      marker?.sourceProjectRef === copyReceipt.sourceProjectRef &&
+        marker?.targetProjectRef === copyReceipt.targetProjectRef &&
+        marker?.manifestDigest === copyReceipt.manifestDigest &&
+        marker?.objectDigest === copyReceipt.objectDigest &&
+        marker?.appCommit === copyReceipt.appCommit &&
+        normalizeDate(marker?.capturedAt) === normalizeDate(copyReceipt.capturedAt) &&
+        ["projects", "items", "histories", "images"].every(
+          (field) => Number(marker?.counts?.[field]) === copyReceipt.counts[field],
+        ) &&
+        ["projects", "items", "histories", "images", "objects"].every(
+          (field) =>
+            marker?.datasetDigests?.[field] === copyReceipt.datasetDigests[field],
+        ),
+      "数据库复制标记与回执不一致",
+    )
+  }
 
   return {
     ok: differences.length === 0,
