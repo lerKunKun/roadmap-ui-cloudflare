@@ -27,7 +27,7 @@ function manifestWithImages() {
         width: 1,
         height: 1,
         createdAt: "2026-08-25T00:01:00.000Z",
-        sha256: null,
+        sha256: null as string | null,
       },
       {
         id: "30000000-0000-4000-8000-000000000002",
@@ -67,7 +67,9 @@ describe("task clone storage copy", () => {
 
     expect(hydrated).not.toBe(manifest)
     expect(manifest.images[0].sha256).toBeNull()
-    expect(hydrated.images.map((image) => image.sha256)).toEqual([
+    expect(
+      hydrated.images.map((image: { sha256: string | null }) => image.sha256),
+    ).toEqual([
       "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
       "486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7",
     ])

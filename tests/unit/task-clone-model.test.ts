@@ -55,7 +55,7 @@ function validManifest() {
         width: 800,
         height: 600,
         createdAt: "2026-08-25T00:01:00.000Z",
-        sha256: null,
+        sha256: null as string | null,
       },
     ],
   }
@@ -132,10 +132,22 @@ describe("task clone reconciliation", () => {
     const audit = {
       projects: manifest.projects,
       items: manifest.items.map((item) => ({ ...item, voteCount: "7" })),
-      histories: manifest.histories.map(({ sourceOrder: _sourceOrder, ...history }) =>
-        history,
-      ),
-      images: manifest.images.map(({ sha256: _sha256, ...image }) => image),
+      histories: manifest.histories.map((history) => ({
+        roadmapItemId: history.roadmapItemId,
+        fromStatus: history.fromStatus,
+        toStatus: history.toStatus,
+        changedAt: history.changedAt,
+      })),
+      images: manifest.images.map((image) => ({
+        id: image.id,
+        roadmapItemId: image.roadmapItemId,
+        storagePath: image.storagePath,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        width: image.width,
+        height: image.height,
+        createdAt: image.createdAt,
+      })),
       objectHashes: {
         [manifest.images[0].storagePath]: "a".repeat(64),
       },
@@ -165,10 +177,22 @@ describe("task clone reconciliation", () => {
     const audit = {
       projects: manifest.projects,
       items: manifest.items.map((item) => ({ ...item, voteCount: "8" })),
-      histories: manifest.histories.map(({ sourceOrder: _sourceOrder, ...history }) =>
-        history,
-      ),
-      images: manifest.images.map(({ sha256: _sha256, ...image }) => image),
+      histories: manifest.histories.map((history) => ({
+        roadmapItemId: history.roadmapItemId,
+        fromStatus: history.fromStatus,
+        toStatus: history.toStatus,
+        changedAt: history.changedAt,
+      })),
+      images: manifest.images.map((image) => ({
+        id: image.id,
+        roadmapItemId: image.roadmapItemId,
+        storagePath: image.storagePath,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        width: image.width,
+        height: image.height,
+        createdAt: image.createdAt,
+      })),
       objectHashes: {
         [manifest.images[0].storagePath]: "b".repeat(64),
       },
