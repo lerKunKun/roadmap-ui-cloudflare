@@ -132,6 +132,114 @@ describe("task clone storage copy", () => {
     expect(methods).toEqual(["HEAD"])
   })
 
+  it("accepts the legacy Supabase 400 response for a missing target object", async () => {
+    const manifest = manifestWithImages()
+    manifest.images[0].sha256 =
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    manifest.images = [manifest.images[0]]
+    const requests: Request[] = []
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      requests.push(request)
+      if (request.url.startsWith(TARGET_URL) && request.method === "HEAD") {
+        return new Response(null, { status: 400 })
+      }
+      if (request.url.startsWith(TARGET_URL) && request.method === "GET") {
+        return Response.json(
+          {
+            statusCode: "404",
+            error: "not_found",
+            message: "Object not found",
+          },
+          { status: 400 },
+        )
+      }
+      if (request.url.startsWith(SOURCE_URL)) {
+        return new Response(firstBytes, {
+          headers: {
+            "content-type": "image/jpeg",
+            "content-length": String(firstBytes.length),
+          },
+        })
+      }
+      return new Response("{}", { status: 200 })
+    }
+
+    await expect(
+      copyImageObjects({
+        manifest,
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
+        target: { url: TARGET_URL, secretKey: "target-secret" },
+        fetchImpl,
+      }),
+    ).resolves.toEqual({ uploadedPaths: [manifest.images[0].storagePath] })
+    expect(requests.map((request) => request.method)).toEqual([
+      "HEAD",
+      "GET",
+      "GET",
+      "POST",
+    ])
+    expect(requests[1].headers.get("range")).toBe("bytes=0-0")
+  })
+
+  it("does not mistake another Supabase 400 error for a missing object", async () => {
+    const manifest = manifestWithImages()
+    manifest.images[0].sha256 = "a".repeat(64)
+    manifest.images = [manifest.images[0]]
+    const methods: string[] = []
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      methods.push(request.method)
+      if (request.method === "HEAD") return new Response(null, { status: 400 })
+      return Response.json(
+        { statusCode: "400", error: "invalid_request", message: "Invalid request" },
+        { status: 400 },
+      )
+    }
+
+    await expect(
+      copyImageObjects({
+        manifest,
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
+        target: { url: TARGET_URL, secretKey: "target-secret" },
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({ code: "TARGET_OBJECT_CHECK_FAILED" })
+    expect(methods).toEqual(["HEAD", "GET"])
+  })
+
+  it("uses the Range probe result even if a nonstandard HEAD 400 has a legacy body", async () => {
+    const manifest = manifestWithImages()
+    manifest.images[0].sha256 = "a".repeat(64)
+    manifest.images = [manifest.images[0]]
+    const methods: string[] = []
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      methods.push(request.method)
+      if (request.method === "HEAD") {
+        return Response.json(
+          {
+            statusCode: "404",
+            error: "not_found",
+            message: "Object not found",
+          },
+          { status: 400 },
+        )
+      }
+      return new Response(firstBytes, { status: 200 })
+    }
+
+    await expect(
+      copyImageObjects({
+        manifest,
+        source: { url: SOURCE_URL, secretKey: "source-secret" },
+        target: { url: TARGET_URL, secretKey: "target-secret" },
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({ code: "TARGET_OBJECT_EXISTS" })
+    expect(methods).toEqual(["HEAD", "GET"])
+  })
+
   it("cleans uploaded target objects in reverse order after a later failure", async () => {
     const hydrated = await hydrateImageHashes({
       manifest: manifestWithImages(),

@@ -58,6 +58,21 @@ function storageHeaders(secretKey, extra = {}) {
   }
 }
 
+async function isMissingObjectResponse(response) {
+  if (response.status === 404) return true
+  if (response.status !== 400) return false
+  try {
+    const payload = await response.json()
+    return (
+      String(payload?.statusCode) === "404" &&
+      payload?.error === "not_found" &&
+      payload?.message === "Object not found"
+    )
+  } catch {
+    return false
+  }
+}
+
 async function readVerifiedImage({ image, source, fetchImpl }) {
   const response = await fetchImpl(objectUrl(source.url, image.storagePath), {
     method: "GET",
@@ -145,7 +160,8 @@ export async function copyImageObjects({
     if (!/^[a-f0-9]{64}$/.test(image.sha256 ?? "")) {
       throw new CloneStorageError("IMAGE_HASH_MISSING", "复制清单缺少图片校验值")
     }
-    const response = await fetchImpl(objectUrl(target.url, image.storagePath), {
+    const url = objectUrl(target.url, image.storagePath)
+    let response = await fetchImpl(url, {
       method: "HEAD",
       headers: storageHeaders(target.secretKey),
     })
@@ -155,7 +171,21 @@ export async function copyImageObjects({
         "目标图片对象已存在，拒绝覆盖",
       )
     }
-    if (response.status !== 404) {
+    let missing = response.status === 404
+    if (response.status === 400) {
+      response = await fetchImpl(url, {
+        method: "GET",
+        headers: storageHeaders(target.secretKey, { Range: "bytes=0-0" }),
+      })
+      if (response.ok) {
+        throw new CloneStorageError(
+          "TARGET_OBJECT_EXISTS",
+          "目标图片对象已存在，拒绝覆盖",
+        )
+      }
+      missing = await isMissingObjectResponse(response)
+    }
+    if (!missing) {
       throw new CloneStorageError("TARGET_OBJECT_CHECK_FAILED", "目标图片预检失败")
     }
   }
