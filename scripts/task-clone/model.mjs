@@ -224,3 +224,142 @@ export function parseCloneManifest(value) {
   }
   return structuredClone(value)
 }
+
+function normalizeDate(value) {
+  return new Date(value).toISOString()
+}
+
+function stableRows(rows) {
+  return [...rows].map((row) => JSON.stringify(row)).sort()
+}
+
+function sameRows(left, right) {
+  return JSON.stringify(stableRows(left)) === JSON.stringify(stableRows(right))
+}
+
+export function reconcileSnapshot(manifestInput, audit, { expectedAuthUsers }) {
+  const manifest = parseCloneManifest(manifestInput)
+  const differences = []
+  const add = (condition, message) => {
+    if (!condition) differences.push(message)
+  }
+
+  const normalizeProject = (project) => ({
+    id: project.id,
+    name: project.name,
+    slug: project.slug,
+    projectUrl: project.projectUrl ?? null,
+    sortOrder: project.sortOrder,
+    createdAt: normalizeDate(project.createdAt),
+    updatedAt: normalizeDate(project.updatedAt),
+  })
+  add(
+    sameRows(manifest.projects.map(normalizeProject), audit.projects.map(normalizeProject)),
+    "项目数据不一致",
+  )
+
+  const normalizeItem = (item) => ({
+    id: item.id,
+    projectId: item.projectId,
+    title: item.title,
+    description: item.description,
+    status: item.status,
+    sortOrder: item.sortOrder,
+    createdAt: normalizeDate(item.createdAt),
+    updatedAt: normalizeDate(item.updatedAt),
+    voteBaseline: String(item.voteBaseline),
+  })
+  add(
+    sameRows(manifest.items.map(normalizeItem), audit.items.map(normalizeItem)),
+    "Roadmap 条目数据不一致",
+  )
+  const sourceVotes = Object.fromEntries(
+    manifest.items.map((item) => [item.id, String(item.voteBaseline)]),
+  )
+  add(
+    audit.items.every(
+      (item) => sourceVotes[item.id] !== undefined && String(item.voteCount) === sourceVotes[item.id],
+    ) && audit.items.length === manifest.items.length,
+    "公开票数不一致",
+  )
+
+  const normalizeHistory = (history) => ({
+    roadmapItemId: history.roadmapItemId,
+    fromStatus: history.fromStatus ?? null,
+    toStatus: history.toStatus,
+    changedAt: normalizeDate(history.changedAt),
+  })
+  add(
+    sameRows(
+      manifest.histories.map(normalizeHistory),
+      audit.histories.map(normalizeHistory),
+    ),
+    "状态时间轴不一致",
+  )
+
+  const normalizeImage = (image) => ({
+    id: image.id,
+    roadmapItemId: image.roadmapItemId,
+    storagePath: image.storagePath,
+    mimeType: image.mimeType,
+    sizeBytes: image.sizeBytes,
+    width: image.width,
+    height: image.height,
+    createdAt: normalizeDate(image.createdAt),
+  })
+  add(
+    sameRows(manifest.images.map(normalizeImage), audit.images.map(normalizeImage)),
+    "图片元数据不一致",
+  )
+  add(
+    manifest.images.every(
+      (image) => audit.objectHashes?.[image.storagePath] === image.sha256,
+    ) && Object.keys(audit.objectHashes ?? {}).length === manifest.images.length,
+    "图片对象哈希不一致",
+  )
+
+  const expectedBytes = manifest.images.reduce(
+    (total, image) => total + image.sizeBytes,
+    0,
+  )
+  add(Number(audit.usedBytes) === expectedBytes, "图片逻辑用量不一致")
+  add(audit.operationalCounts?.votes === 0, "目标 votes 必须为空")
+  add(
+    audit.operationalCounts?.suggestionRateLimits === 0,
+    "目标 suggestion_rate_limits 必须为空",
+  )
+  add(
+    audit.operationalCounts?.suggestionImageRateLimits === 0,
+    "目标 suggestion_image_rate_limits 必须为空",
+  )
+  add(
+    audit.bucket?.public === false &&
+      Number(audit.bucket?.fileSizeLimit) === 5_000_000 &&
+      JSON.stringify([...(audit.bucket?.allowedMimeTypes ?? [])].sort()) ===
+        JSON.stringify(["image/jpeg", "image/png"]),
+    "目标图片 Bucket 配置不一致",
+  )
+
+  const actualEmails = (audit.authUsers ?? []).map((user) => user.email).sort()
+  const expectedEmails =
+    typeof expectedAuthUsers === "number"
+      ? Array(expectedAuthUsers).fill(null)
+      : expectedAuthUsers.map((user) => user.email).sort()
+  const authMatches =
+    typeof expectedAuthUsers === "number"
+      ? actualEmails.length === expectedAuthUsers
+      : JSON.stringify(actualEmails) === JSON.stringify(expectedEmails)
+  add(authMatches, "目标 Auth 用户不符合预期")
+
+  return {
+    ok: differences.length === 0,
+    differences,
+    counts: {
+      projects: manifest.projects.length,
+      items: manifest.items.length,
+      histories: manifest.histories.length,
+      images: manifest.images.length,
+      imageBytes: expectedBytes,
+    },
+  }
+}

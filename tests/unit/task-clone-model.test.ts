@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   parseCloneManifest,
+  reconcileSnapshot,
   validateCloneManifest,
 } from "../../scripts/task-clone/model.mjs"
 
@@ -119,6 +120,83 @@ describe("task clone manifest", () => {
     )
     expect(validateCloneManifest(negative)).toContain(
       "条目 20000000-0000-4000-8000-000000000001 的历史票数无效",
+    )
+  })
+})
+
+describe("task clone reconciliation", () => {
+  it("accepts an exact copy with empty operational state", () => {
+    const manifest = validManifest()
+    manifest.items[0].voteBaseline = "7"
+    manifest.images[0].sha256 = "a".repeat(64)
+    const audit = {
+      projects: manifest.projects,
+      items: manifest.items.map((item) => ({ ...item, voteCount: "7" })),
+      histories: manifest.histories.map(({ sourceOrder: _sourceOrder, ...history }) =>
+        history,
+      ),
+      images: manifest.images.map(({ sha256: _sha256, ...image }) => image),
+      objectHashes: {
+        [manifest.images[0].storagePath]: "a".repeat(64),
+      },
+      operationalCounts: {
+        votes: 0,
+        suggestionRateLimits: 0,
+        suggestionImageRateLimits: 0,
+      },
+      usedBytes: 1024,
+      bucket: {
+        public: false,
+        fileSizeLimit: 5_000_000,
+        allowedMimeTypes: ["image/jpeg", "image/png"],
+      },
+      authUsers: [],
+    }
+
+    expect(
+      reconcileSnapshot(manifest, audit, { expectedAuthUsers: 0 }),
+    ).toMatchObject({ ok: true, differences: [] })
+  })
+
+  it("reports vote, hash, usage, operational, and auth divergence", () => {
+    const manifest = validManifest()
+    manifest.items[0].voteBaseline = "7"
+    manifest.images[0].sha256 = "a".repeat(64)
+    const audit = {
+      projects: manifest.projects,
+      items: manifest.items.map((item) => ({ ...item, voteCount: "8" })),
+      histories: manifest.histories.map(({ sourceOrder: _sourceOrder, ...history }) =>
+        history,
+      ),
+      images: manifest.images.map(({ sha256: _sha256, ...image }) => image),
+      objectHashes: {
+        [manifest.images[0].storagePath]: "b".repeat(64),
+      },
+      operationalCounts: {
+        votes: 1,
+        suggestionRateLimits: 0,
+        suggestionImageRateLimits: 0,
+      },
+      usedBytes: 1000,
+      bucket: {
+        public: false,
+        fileSizeLimit: 5_000_000,
+        allowedMimeTypes: ["image/jpeg", "image/png"],
+      },
+      authUsers: [{ email: "unexpected@example.com" }],
+    }
+
+    const result = reconcileSnapshot(manifest, audit, { expectedAuthUsers: 0 })
+
+    expect(result.ok).toBe(false)
+    expect(result.differences).toEqual(
+      expect.arrayContaining([
+        "公开票数不一致",
+        "图片对象哈希不一致",
+        "图片逻辑用量不一致",
+        "目标 votes 必须为空",
+        "目标 Auth 用户不符合预期",
+      ]),
     )
   })
 })
