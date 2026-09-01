@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   parseDeploymentInputs,
+  readDeploymentInputs,
   validateDeploymentInputs,
 } from "../../scripts/deployment-inputs.mjs"
 
@@ -25,6 +29,16 @@ const validInputs = {
 }
 
 describe("deployment inputs", () => {
+  it("reads an explicitly selected deployment input file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "roadmap-deploy-inputs-"))
+    const path = join(directory, ".env.task.deploy.local")
+    await writeFile(path, "ROADMAP_DOMAIN=task.telljax.com\n", "utf8")
+
+    await expect(readDeploymentInputs(path)).resolves.toEqual({
+      ROADMAP_DOMAIN: "task.telljax.com",
+    })
+  })
+
   it("accepts a complete deployment configuration", () => {
     expect(validateDeploymentInputs(validInputs)).toEqual([])
   })

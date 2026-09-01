@@ -15,6 +15,12 @@
     "test:e2e": "playwright test",
     "test:functions": "node scripts/test-local-functions.mjs",
     "deploy:check": "node scripts/deployment-inputs.mjs",
+    "deploy:task:check": "node scripts/task-clone/run.mjs status",
+    "deploy:task:prepare": "node scripts/task-clone/run.mjs prepare",
+    "deploy:task:copy": "node scripts/task-clone/run.mjs copy",
+    "deploy:task:deploy": "node scripts/task-clone/run.mjs deploy",
+    "deploy:task:domain": "node scripts/task-clone/run.mjs domain",
+    "deploy:task:smoke": "node scripts/task-clone/smoke.mjs",
     "admin-password": "node scripts/generate-admin-password.mjs",
     "supabase:test": "supabase test db"
   },

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
@@ -54,6 +54,12 @@ export function parseDeploymentInputs(source) {
         return [key, rawValue]
       })
       .filter(Boolean),
+  )
+}
+
+export async function readDeploymentInputs(path = DEPLOYMENT_INPUTS_FILE) {
+  return parseDeploymentInputs(
+    await readFile(resolve(process.cwd(), path), "utf8"),
   )
 }
 
@@ -141,12 +147,10 @@ export function validateDeploymentInputs(inputs) {
   return errors
 }
 
-function main() {
+async function main() {
   let inputs
   try {
-    inputs = parseDeploymentInputs(
-      readFileSync(resolve(process.cwd(), DEPLOYMENT_INPUTS_FILE), "utf8"),
-    )
+    inputs = await readDeploymentInputs()
   } catch (error) {
     const message = error?.code === "ENOENT"
       ? `找不到 ${DEPLOYMENT_INPUTS_FILE}`
@@ -168,4 +172,9 @@ function main() {
 }
 
 const entryPoint = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : ""
-if (entryPoint === import.meta.url) main()
+if (entryPoint === import.meta.url) {
+  main().catch(() => {
+    process.stderr.write("部署配置检查失败\n")
+    process.exitCode = 1
+  })
+}
