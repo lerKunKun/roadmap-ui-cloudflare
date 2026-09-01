@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -6,6 +6,39 @@ const SUPABASE_API = "https://api.supabase.com/v1"
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4"
 const TARGET_DOMAIN = "task.telljax.com"
 const TARGET_PAGES_PROJECT = "task-roadmap-ui"
+
+/**
+ * @typedef {{
+ *   connect: () => Promise<unknown>,
+ *   query: (sql: string) => Promise<{
+ *     command?: string,
+ *     fields?: unknown[],
+ *     rows?: unknown[]
+ *   } | Array<{
+ *     command?: string,
+ *     fields?: unknown[],
+ *     rows?: unknown[]
+ *   }>>,
+ *   end: () => Promise<unknown>
+ * }} PgClient
+ */
+
+const POSTGRES_TIMEOUTS = Object.freeze({
+  connectionTimeoutMillis: 15_000,
+  statement_timeout: 120_000,
+  lock_timeout: 30_000,
+  idle_in_transaction_session_timeout: 30_000,
+  query_timeout: 125_000,
+})
+
+const SAFE_POSTGRES_ERROR_CODES = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+])
 
 export function resolveNpxInvocation(args, runtime = {}) {
   const platform = runtime.platform ?? process.platform
@@ -90,12 +123,74 @@ function databaseUrl({ projectRef, region, databasePassword }) {
   return `postgresql://postgres.${projectRef}:${encodeURIComponent(databasePassword)}@aws-0-${region}.pooler.supabase.com:5432/postgres?sslmode=require`
 }
 
+function pgDatabaseUrl({ projectRef, region, databasePassword }) {
+  return `postgresql://postgres.${projectRef}:${encodeURIComponent(databasePassword)}@aws-0-${region}.pooler.supabase.com:5432/postgres`
+}
+
+/**
+ * @param {string} connectionString
+ * @param {{
+ *   Client?: new (options: Record<string, unknown>) => PgClient,
+ *   readFileImpl?: (url: URL, encoding: BufferEncoding) => Promise<string>
+ * }} [dependencies]
+ * @returns {Promise<PgClient>}
+ */
+export async function createPgClient(connectionString, dependencies = {}) {
+  const Client = dependencies.Client ?? (await import("pg")).Client
+  const readFileImpl = dependencies.readFileImpl ?? readFile
+  const ca = await readFileImpl(
+    new URL("../../supabase/certificates/prod-ca-2021.crt", import.meta.url),
+    "utf8",
+  )
+  return /** @type {PgClient} */ (
+    new Client({
+      connectionString,
+      ssl: { rejectUnauthorized: true, ca },
+      application_name: "task-roadmap-clone",
+      ...POSTGRES_TIMEOUTS,
+    })
+  )
+}
+
+function assertSingleReadOnlyQuery(sql, errorMessage) {
+  const trimmed = sql.trim()
+  const statement = trimmed.endsWith(";") ? trimmed.slice(0, -1).trimEnd() : trimmed
+  if (
+    !/^(select|with)\b/i.test(statement) ||
+    statement.includes(";") ||
+    /\b(begin|start\s+transaction|commit|rollback|savepoint|release|set\s+transaction|prepare\s+transaction)\b/i.test(
+      statement,
+    ) ||
+    /\b(insert|update|delete|truncate|drop|alter|create|grant|revoke|call|do)\b/i.test(
+      statement,
+    )
+  ) {
+    throw new Error(errorMessage)
+  }
+}
+
+function isRowProducingResult(result) {
+  if (!Array.isArray(result?.rows)) return false
+  if (Array.isArray(result.fields)) return result.fields.length > 0
+  return /^(SELECT|SHOW|TABLE|VALUES|FETCH)$/i.test(result.command ?? "")
+}
+
+function safePostgresErrorCode(error, databasePassword) {
+  const candidate = typeof error?.code === "string" ? error.code : ""
+  if (candidate === databasePassword) return "query"
+  if (/^[0-9A-Z]{5}$/.test(candidate) || SAFE_POSTGRES_ERROR_CODES.has(candidate)) {
+    return candidate
+  }
+  return "query"
+}
+
 export function createSupabaseProvider({
   accessToken,
   protectedProjectRef = /** @type {string | null} */ (null),
   protectedSecretKey = /** @type {string | null} */ (null),
   runCommand,
   fetchImpl = fetch,
+  pgClientFactory = createPgClient,
   workdir = process.cwd(),
 }) {
   const commandEnv = { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken }
@@ -112,17 +207,16 @@ export function createSupabaseProvider({
   }
 
   function assertProtectedReadOnly(projectRef, sql, readOnly) {
-    if (!protectedProjectRef || projectRef !== protectedProjectRef) return
-    if (
-      readOnly !== true ||
-      !/^\s*begin\s+transaction\s+isolation\s+level\s+repeatable\s+read\s+read\s+only\s*;/i.test(
-        sql,
-      ) ||
-      /\b(insert|update|delete|truncate|drop|alter|create|grant|revoke|call|do)\b/i.test(
-        sql,
-      )
-    ) {
+    if (protectedProjectRef && projectRef === protectedProjectRef && readOnly !== true) {
       throw new Error("拒绝修改源 Supabase 项目")
+    }
+    if (readOnly === true) {
+      assertSingleReadOnlyQuery(
+        sql,
+        protectedProjectRef === projectRef
+          ? "拒绝修改源 Supabase 项目"
+          : "拒绝执行非只读数据库查询",
+      )
     }
   }
 
@@ -229,23 +323,52 @@ export function createSupabaseProvider({
   }) {
     assertProtectedReadOnly(projectRef, sql, readOnly)
     if (!readOnly) assertMutableProject(projectRef)
-    return withTemporaryFile("task-roadmap-sql", sql, (path) =>
-      runNpx(
-        runCommand,
-        [
-          "supabase",
-          "db",
-          "query",
-          "--db-url",
-          databaseUrl({ projectRef, region, databasePassword }),
-          "--file",
-          path,
-          "--output-format",
-          "json",
-        ],
-        { cwd: workdir, env: commandEnv, operation },
-      ),
-    )
+    let client
+    let operationError = null
+    let readOnlyTransactionOpen = false
+    try {
+      client = await pgClientFactory(
+        pgDatabaseUrl({ projectRef, region, databasePassword }),
+      )
+      await client.connect()
+      if (readOnly) {
+        await client.query(
+          "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+        )
+        readOnlyTransactionOpen = true
+      }
+      const queryResult = await client.query(sql)
+      if (readOnly) {
+        await client.query("COMMIT")
+        readOnlyTransactionOpen = false
+      }
+      const results = Array.isArray(queryResult) ? queryResult : [queryResult]
+      const rowResult = [...results].reverse().find(isRowProducingResult)
+      return {
+        stdout: JSON.stringify({ rows: rowResult?.rows ?? [] }),
+        stderr: "",
+        exitCode: 0,
+      }
+    } catch (error) {
+      operationError = error
+      if (client && readOnlyTransactionOpen) {
+        try {
+          await client.query("ROLLBACK")
+        } catch {
+          // The original database error is more useful and must not be masked.
+        }
+      }
+      const code = safePostgresErrorCode(error, databasePassword)
+      throw new Error(`${operation}失败（PostgreSQL ${code}）`)
+    } finally {
+      if (client) {
+        try {
+          await client.end()
+        } catch {
+          if (!operationError) throw new Error(`${operation}失败（关闭 PostgreSQL 连接）`)
+        }
+      }
+    }
   }
 
   async function applyMigrations({ projectRef, region, databasePassword, dryRun = false }) {

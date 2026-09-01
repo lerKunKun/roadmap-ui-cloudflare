@@ -1,11 +1,31 @@
+import { X509Certificate } from "node:crypto"
+import { readFile } from "node:fs/promises"
+import { resolve } from "node:path"
+
 import { describe, expect, it } from "vitest"
 
 import {
   createCloudflareProvider,
+  createPgClient,
   createSupabaseProvider,
   resolveNpmInvocation,
   resolveNpxInvocation,
 } from "../../scripts/task-clone/providers.mjs"
+
+it("pins the official Supabase database root CA", async () => {
+  const certificate = new X509Certificate(
+    await readFile(
+      resolve(process.cwd(), "supabase/certificates/prod-ca-2021.crt"),
+      "utf8",
+    ),
+  )
+
+  expect(certificate.ca).toBe(true)
+  expect(certificate.subject).toContain("CN=Supabase Root 2021 CA")
+  expect(certificate.fingerprint256).toBe(
+    "80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA",
+  )
+})
 
 it("runs npx through Node instead of spawning a Windows command shim", () => {
   expect(
@@ -42,12 +62,266 @@ it("runs npm scripts through the npm CLI on Windows", () => {
 })
 
 describe("task clone Supabase provider", () => {
+  it("configures bounded PostgreSQL connection, statement, lock, and idle timeouts", async () => {
+    let config: Record<string, unknown> | undefined
+    class FakeClient {
+      constructor(options: Record<string, unknown>) {
+        config = options
+      }
+
+      async connect() {}
+
+      async query() {
+        return { rows: [] }
+      }
+
+      async end() {}
+    }
+
+    await createPgClient("postgresql://example.invalid/postgres", {
+      Client: FakeClient,
+      readFileImpl: async () => "test-ca",
+    })
+
+    expect(config).toMatchObject({
+      connectionTimeoutMillis: 15_000,
+      statement_timeout: 120_000,
+      lock_timeout: 30_000,
+      idle_in_transaction_session_timeout: 30_000,
+      query_timeout: 125_000,
+    })
+  })
+
+  it("keeps the protected source inside a provider-owned read-only transaction", async () => {
+    const events: string[] = []
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => events.push("connect"),
+        query: async (sql: string) => {
+          events.push(sql)
+          return { command: "SELECT", fields: [{ name: "one" }], rows: [{ one: 1 }] }
+        },
+        end: async () => events.push("end"),
+      }),
+    })
+
+    await expect(
+      provider.queryDatabase({
+        projectRef: "abcdefghijklmnopqrst",
+        region: "us-west-2",
+        databasePassword: "hidden",
+        sql: "select 1 as one",
+        operation: "safe",
+        readOnly: true,
+      }),
+    ).resolves.toEqual({
+      stdout: JSON.stringify({ rows: [{ one: 1 }] }),
+      stderr: "",
+      exitCode: 0,
+    })
+    expect(events).toEqual([
+      "connect",
+      "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+      "select 1 as one",
+      "COMMIT",
+      "end",
+    ])
+  })
+
+  it("rejects a protected-source transaction escape before connecting", async () => {
+    let connected = false
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => {
+          connected = true
+        },
+        query: async () => ({ rows: [] }),
+        end: async () => {},
+      }),
+    })
+
+    await expect(
+      provider.queryDatabase({
+        projectRef: "abcdefghijklmnopqrst",
+        region: "us-west-2",
+        databasePassword: "hidden",
+        sql: "select 1; commit; select public.consume_suggestion_image_quota('x')",
+        operation: "unsafe escape",
+        readOnly: true,
+      }),
+    ).rejects.toThrow("拒绝修改源 Supabase 项目")
+    expect(connected).toBe(false)
+  })
+
+  it("rolls back and closes after a read-only query fails without leaking credentials", async () => {
+    const events: string[] = []
+    const databasePassword = "hiddenpassword123"
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => events.push("connect"),
+        query: async (sql: string) => {
+          events.push(sql)
+          if (sql === "select 1") {
+            const error = new Error(`failed ${databasePassword}`)
+            Object.assign(error, { code: databasePassword })
+            throw error
+          }
+          return { rows: [] }
+        },
+        end: async () => events.push("end"),
+      }),
+    })
+
+    const promise = provider.queryDatabase({
+      projectRef: "abcdefghijklmnopqrst",
+      region: "us-west-2",
+      databasePassword,
+      sql: "select 1",
+      operation: "snapshot",
+      readOnly: true,
+    })
+    await expect(promise).rejects.toThrow("snapshot失败（PostgreSQL query）")
+    await expect(promise).rejects.not.toThrow(databasePassword)
+    expect(events).toEqual([
+      "connect",
+      "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+      "select 1",
+      "ROLLBACK",
+      "end",
+    ])
+  })
+
+  it("closes the PostgreSQL client when connecting fails", async () => {
+    const events: string[] = []
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => {
+          events.push("connect")
+          throw Object.assign(new Error("connection failed"), {
+            code: "ECONNREFUSED",
+          })
+        },
+        query: async () => ({ rows: [] }),
+        end: async () => events.push("end"),
+      }),
+    })
+
+    await expect(
+      provider.queryDatabase({
+        projectRef: "bcdefghijklmnopqrstu",
+        region: "us-west-2",
+        databasePassword: "hidden",
+        sql: "select 1",
+        operation: "connect",
+      }),
+    ).rejects.toThrow("connect失败（PostgreSQL ECONNREFUSED）")
+    expect(events).toEqual(["connect", "end"])
+  })
+
+  it("returns the final row-producing result even when it has no rows", async () => {
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => {},
+        query: async () => [
+          { command: "SELECT", fields: [{ name: "old" }], rows: [{ old: true }] },
+          { command: "SELECT", fields: [{ name: "current" }], rows: [] },
+          { command: "COMMIT", fields: [], rows: [] },
+        ],
+        end: async () => {},
+      }),
+    })
+
+    await expect(
+      provider.queryDatabase({
+        projectRef: "bcdefghijklmnopqrstu",
+        region: "us-west-2",
+        databasePassword: "hidden",
+        sql: "select true as old; select false as current; commit;",
+        operation: "empty result",
+      }),
+    ).resolves.toMatchObject({ stdout: JSON.stringify({ rows: [] }) })
+  })
+
+  it("executes multi-statement SQL on one PostgreSQL connection", async () => {
+    const events: string[] = []
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async () => {
+        throw new Error("Supabase CLI db query must not be used")
+      },
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async (connectionString: string) => {
+        expect(connectionString).toContain("postgres.bcdefghijklmnopqrstu")
+        expect(connectionString).not.toContain("hidden password")
+        return {
+          connect: async () => events.push("connect"),
+          query: async (sql: string) => {
+            events.push(sql)
+            return [
+              { command: "BEGIN", fields: [], rows: [] },
+              {
+                command: "SELECT",
+                fields: [{ name: "snapshot" }],
+                rows: [{ snapshot: { version: 1 } }],
+              },
+              { command: "COMMIT", fields: [], rows: [] },
+            ]
+          },
+          end: async () => events.push("end"),
+        }
+      },
+    })
+
+    await expect(
+      provider.queryDatabase({
+        projectRef: "bcdefghijklmnopqrstu",
+        region: "us-west-2",
+        databasePassword: "hidden password",
+        sql: "begin; select jsonb_build_object('version', 1) as snapshot; commit;",
+        operation: "multi statement",
+      }),
+    ).resolves.toEqual({
+      stdout: JSON.stringify({ rows: [{ snapshot: { version: 1 } }] }),
+      stderr: "",
+      exitCode: 0,
+    })
+    expect(events).toEqual([
+      "connect",
+      "begin; select jsonb_build_object('version', 1) as snapshot; commit;",
+      "end",
+    ])
+  })
+
   it("independently refuses a mutating database call against the protected source", async () => {
     const provider = createSupabaseProvider({
       accessToken: "management-token",
       protectedProjectRef: "abcdefghijklmnopqrst",
       runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
       fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => {},
+        query: async () => ({ rows: [{ one: 1 }] }),
+        end: async () => {},
+      }),
     })
 
     await expect(
@@ -65,7 +339,7 @@ describe("task clone Supabase provider", () => {
         projectRef: "abcdefghijklmnopqrst",
         region: "us-west-2",
         databasePassword: "hidden",
-        sql: "begin transaction isolation level repeatable read read only; select 1; commit;",
+        sql: "select 1",
         operation: "safe",
         readOnly: true,
       }),

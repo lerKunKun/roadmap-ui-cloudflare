@@ -189,8 +189,7 @@ export function operationalSnapshotSql({ suggestionHash, imageHash }) {
   if (![suggestionHash, imageHash].every((value) => /^[a-f0-9]{64}$/.test(value))) {
     throw new Error("目标冒烟运行态哈希无效")
   }
-  return `begin transaction isolation level repeatable read read only;
-select jsonb_build_object(
+  return `select jsonb_build_object(
   'suggestionRateLimits', coalesce((select jsonb_agg(jsonb_build_object(
     'ipHash', ip_hash, 'windowStartedAt', window_started_at, 'submissionCount', submission_count
   ) order by ip_hash, window_started_at) from public.suggestion_rate_limits
@@ -204,8 +203,7 @@ select jsonb_build_object(
     'suggestionRateLimits', (select count(*) from public.suggestion_rate_limits),
     'suggestionImageRateLimits', (select count(*) from public.suggestion_image_rate_limits)
   )
-) as operational;
-commit;`
+) as operational;`
 }
 
 export function restoreOperationalSql(snapshot) {

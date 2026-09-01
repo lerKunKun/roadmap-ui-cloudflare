@@ -35,8 +35,7 @@ export function buildSnapshotSql(sourceRef) {
     throw new Error("源 Supabase Project Ref 无效")
   }
 
-  return `begin transaction isolation level repeatable read read only;
-with captured as (
+  return `with captured as (
   select clock_timestamp() as captured_at
 )
 select jsonb_build_object(
@@ -94,8 +93,7 @@ select jsonb_build_object(
     from public.roadmap_item_images as image
   ), '[]'::jsonb)
 ) as snapshot
-from captured;
-commit;`
+from captured;`
 }
 
 export function parseDbQueryJson(stdout) {

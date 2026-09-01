@@ -22,12 +22,10 @@ const emptySnapshot = {
 }
 
 describe("task clone database snapshot", () => {
-  it("emits one read-only repeatable-read snapshot query", () => {
+  it("emits one snapshot statement for the provider-owned read-only transaction", () => {
     const sql = buildSnapshotSql("abcdefghijklmnopqrst")
 
-    expect(sql).toContain(
-      "begin transaction isolation level repeatable read read only",
-    )
+    expect(sql.trimStart()).toMatch(/^with captured as/i)
     expect(sql.match(/clock_timestamp\(\)/g)).toHaveLength(1)
     expect(sql).toContain("public.roadmap_vote_count(item.id)")
     expect(sql).toContain("from public.projects")
@@ -38,7 +36,8 @@ describe("task clone database snapshot", () => {
     expect(sql).not.toContain("suggestion_rate_limits")
     expect(sql).not.toContain("suggestion_image_rate_limits")
     expect(sql).not.toContain("auth.users")
-    expect(sql.trimEnd()).toMatch(/commit;$/)
+    expect(sql).not.toMatch(/\b(begin|commit|rollback)\b/i)
+    expect(sql.trimEnd()).toMatch(/from captured;$/)
   })
 
   it("parses the bounded JSON returned by the Supabase CLI", () => {
@@ -61,7 +60,8 @@ describe("task clone database snapshot", () => {
   it("captures and validates the snapshot without returning provider wrappers", async () => {
     const query = async ({ sql, projectRef }: { sql: string; projectRef: string }) => {
       expect(projectRef).toBe("abcdefghijklmnopqrst")
-      expect(sql).toContain("repeatable read read only")
+      expect(sql.trimStart()).toMatch(/^with captured as/i)
+      expect(sql).not.toMatch(/\b(begin|commit|rollback)\b/i)
       return {
         stdout: JSON.stringify({ rows: [{ snapshot: emptySnapshot }] }),
       }
