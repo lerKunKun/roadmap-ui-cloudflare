@@ -127,6 +127,28 @@ describe("advertising image preparation", () => {
     ).rejects.toMatchObject({ code: "IMAGE_CONFLICT" })
   })
 
+  it("never deletes a pre-existing object after a no-overwrite upload conflict", async () => {
+    const removed: string[][] = []
+    await expect(
+      prepareAdvertisingImages(snapshotWithImages(), {
+        downloadSource: async () => ({
+          bytes: imageBytes,
+          contentType: "image/png",
+        }),
+        downloadTarget: async () => null,
+        uploadTarget: async () => {
+          throw Object.assign(new Error("conflict"), {
+            code: "IMAGE_CONFLICT",
+          })
+        },
+        removeTarget: async (paths) => {
+          removed.push(paths)
+        },
+      })
+    ).rejects.toMatchObject({ code: "IMAGE_CONFLICT" })
+    expect(removed).toEqual([])
+  })
+
   it.each([
     ["wrong MIME", { bytes: imageBytes, contentType: "image/jpeg" }],
     [
@@ -230,5 +252,19 @@ describe("advertising Storage REST adapters", () => {
     expect(
       new Headers(requests[1].init.headers).get("authorization")
     ).toBeNull()
+  })
+
+  it("classifies a no-overwrite HTTP conflict without masking it as unavailable", async () => {
+    const deps = createAdvertisingStorageDependencies({
+      sourceUrl: "https://abcdefghijklmnopqrst.supabase.co",
+      sourceSecretKey: "sb_secret_source",
+      targetUrl: "https://bcdefghijklmnopqrstu.supabase.co",
+      targetSecretKey: "sb_secret_target",
+      fetchImpl: async () => new Response(null, { status: 409 }),
+    })
+
+    await expect(
+      deps.uploadTarget("suggestions/folder/image.png", imageBytes, "image/png")
+    ).rejects.toMatchObject({ code: "IMAGE_CONFLICT" })
   })
 })

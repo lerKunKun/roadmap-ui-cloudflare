@@ -76,12 +76,13 @@ function serverHeaders(key: string): Headers {
   return headers
 }
 
-async function readJsonResponse(
+export async function readAdvertisingSyncJsonResponse(
   response: Response,
   code: string
 ): Promise<unknown> {
   if (!response.ok)
     throw Object.assign(new Error("provider request failed"), { code })
+  if (response.status === 204) return null
   try {
     return await response.json()
   } catch {
@@ -121,7 +122,7 @@ function createRuntimeDependencies(
     } catch {
       throw Object.assign(new Error("provider unavailable"), { code })
     }
-    return readJsonResponse(response, code)
+    return readAdvertisingSyncJsonResponse(response, code)
   }
 
   async function targetRpc(
@@ -143,7 +144,10 @@ function createRuntimeDependencies(
       `${config.targetUrl}/rest/v1/roadmap_advertising_sync_object_cleanup?select=storage_path&order=storage_path.asc`,
       { headers: serverHeaders(config.targetServiceRoleKey) }
     )
-    const rows = await readJsonResponse(response, "TARGET_APPLY_FAILED")
+    const rows = await readAdvertisingSyncJsonResponse(
+      response,
+      "TARGET_APPLY_FAILED"
+    )
     return Array.isArray(rows)
       ? rows
           .map((row) =>
@@ -197,7 +201,10 @@ function createRuntimeDependencies(
         `${config.targetUrl}/rest/v1/roadmap_advertising_sync_state?select=active_run_id,last_snapshot_digest&singleton=eq.true`,
         { headers: serverHeaders(config.targetServiceRoleKey) }
       )
-      const value = await readJsonResponse(response, "TARGET_APPLY_FAILED")
+      const value = await readAdvertisingSyncJsonResponse(
+        response,
+        "TARGET_APPLY_FAILED"
+      )
       const row = Array.isArray(value) ? value[0] : null
       if (row?.last_snapshot_digest === digest) return "committed"
       if (row?.active_run_id === runId) return "not_committed"
@@ -251,6 +258,7 @@ type HandlerOptions = {
 
 function responseStatus(code: string): number {
   if (code === "UNAUTHORIZED") return 401
+  if (code === "INVALID_REQUEST") return 400
   if (code === "SYNC_BUSY") return 409
   if (["SNAPSHOT_INVALID", "SOURCE_IDENTITY_INVALID"].includes(code)) return 422
   if (
@@ -284,6 +292,13 @@ export function createAdvertisingSyncHandler(options: HandlerOptions = {}) {
     if (!(await hasValidSyncSecret(providedCronSecret, expectedCronSecret))) {
       const safe = safeSyncError({ code: "UNAUTHORIZED" })
       return Response.json({ ok: false, ...safe }, { status: 401 })
+    }
+
+    try {
+      await request.json()
+    } catch {
+      const safe = safeSyncError({ code: "INVALID_REQUEST" })
+      return Response.json({ ok: false, ...safe }, { status: 400 })
     }
 
     let config: AdvertisingSyncRuntimeConfig

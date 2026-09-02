@@ -491,6 +491,49 @@ describe("task clone Supabase provider", () => {
     expect(secretFile).not.toContain("ADMIN_PASSWORD")
   })
 
+  it("writes target Vault secrets with PostgreSQL parameters and never SQL text", async () => {
+    const queries: Array<string | { text: string; values?: unknown[] }> = []
+    const cronSecret = "a".repeat(64)
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => {},
+        query: async (query: string | { text: string; values?: unknown[] }) => {
+          queries.push(query)
+          const text = typeof query === "string" ? query : query.text
+          return text.startsWith("select id from vault.secrets")
+            ? { rows: [] }
+            : { rows: [] }
+        },
+        end: async () => {},
+      }),
+    })
+
+    await provider.configureAdvertisingSyncVault({
+      projectRef: "bcdefghijklmnopqrstu",
+      region: "us-west-2",
+      databasePassword: "hidden",
+      functionUrl:
+        "https://bcdefghijklmnopqrstu.supabase.co/functions/v1/sync-advertising",
+      publishableKey: `sb_publishable_${"p".repeat(32)}`,
+      cronSecret,
+    })
+
+    const sqlTexts = queries.map((query) =>
+      typeof query === "string" ? query : query.text
+    )
+    expect(sqlTexts.join("\n")).toContain("supabase_vault")
+    expect(sqlTexts.join("\n")).not.toContain(cronSecret)
+    expect(
+      queries.flatMap((query) =>
+        typeof query === "string" ? [] : (query.values ?? [])
+      )
+    ).toContain(cronSecret)
+  })
+
   it("deploys only an allow-listed target Edge Function", async () => {
     const invocations: string[][] = []
     const provider = createSupabaseProvider({

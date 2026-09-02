@@ -679,6 +679,101 @@ export function createSupabaseProvider({
     )
   }
 
+  async function configureAdvertisingSyncVault(input) {
+    const allowed = new Set([
+      "projectRef",
+      "region",
+      "databasePassword",
+      "functionUrl",
+      "publishableKey",
+      "cronSecret",
+    ])
+    if (Object.keys(input ?? {}).some((key) => !allowed.has(key))) {
+      throw new Error("广告同步 Vault 配置包含禁止字段")
+    }
+    const {
+      projectRef,
+      region,
+      databasePassword,
+      functionUrl,
+      publishableKey,
+      cronSecret,
+    } = input ?? {}
+    assertMutableProject(projectRef)
+    if (
+      !/^[a-z0-9]{20}$/.test(projectRef ?? "") ||
+      functionUrl !==
+        `https://${projectRef}.supabase.co/functions/v1/sync-advertising` ||
+      !/^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(publishableKey ?? "") ||
+      !/^[a-f0-9]{64}$/.test(cronSecret ?? "")
+    ) {
+      throw new Error("广告同步 Vault 配置无效")
+    }
+
+    const entries = [
+      ["advertising_sync_function_url", functionUrl],
+      ["advertising_sync_publishable_key", publishableKey],
+      ["advertising_sync_cron_secret", cronSecret],
+    ]
+    let client
+    let transactionOpen = false
+    let operationError = null
+    try {
+      client = await pgClientFactory(
+        pgDatabaseUrl({ projectRef, region, databasePassword })
+      )
+      await client.connect()
+      await client.query("BEGIN")
+      transactionOpen = true
+      await client.query(
+        "create extension if not exists supabase_vault with schema vault"
+      )
+      for (const [name, value] of entries) {
+        const existing = await client.query({
+          text: "select id from vault.secrets where name = $1",
+          values: [name],
+        })
+        if ((existing.rows ?? []).length > 1) {
+          throw new Error("duplicate vault name")
+        }
+        const id = existing.rows?.[0]?.id
+        if (id) {
+          await client.query({
+            text: "select vault.update_secret($1::uuid, $2, $3, $4)",
+            values: [id, value, name, "Roadmap advertising sync"],
+          })
+        } else {
+          await client.query({
+            text: "select vault.create_secret($1, $2, $3)",
+            values: [value, name, "Roadmap advertising sync"],
+          })
+        }
+      }
+      await client.query("COMMIT")
+      transactionOpen = false
+      return { configured: true }
+    } catch (error) {
+      operationError = error
+      if (client && transactionOpen) {
+        try {
+          await client.query("ROLLBACK")
+        } catch {
+          // Preserve the Vault configuration error.
+        }
+      }
+      const code = safePostgresErrorCode(error, databasePassword)
+      throw new Error(`配置广告同步 Vault 失败（PostgreSQL ${code}）`)
+    } finally {
+      if (client) {
+        try {
+          await client.end()
+        } catch {
+          if (!operationError) throw new Error("关闭目标数据库连接失败")
+        }
+      }
+    }
+  }
+
   async function deployEdgeFunction(projectRef, functionName) {
     assertMutableProject(projectRef)
     if (
@@ -729,6 +824,7 @@ export function createSupabaseProvider({
     listAuthUsers,
     setEdgeSecrets,
     setAdvertisingSyncEdgeSecrets,
+    configureAdvertisingSyncVault,
     deployEdgeFunction,
     deployEdgeFunctions,
   }

@@ -2,9 +2,37 @@ import { describe, expect, it } from "vitest"
 
 import {
   installAdvertisingSync,
+  normalizeAdvertisingSyncStatus,
   setAdvertisingSyncCronActive,
   triggerAdvertisingSync,
 } from "../../scripts/task-clone/advertising-sync.mjs"
+
+describe("advertising sync status", () => {
+  it("keeps only safe Cron and pg_net response metadata", () => {
+    expect(
+      normalizeAdvertisingSyncStatus({
+        lastAttemptAt: "2026-09-02T01:17:00Z",
+        cleanup_count: 0,
+        cron: { active: true, schedule: "17 * * * *" },
+        net: {
+          requestId: "9223372036854775807",
+          statusCode: 200,
+          timedOut: false,
+          hasError: false,
+          receivedAt: "2026-09-02T01:17:01Z",
+        },
+      })
+    ).toMatchObject({
+      cronActive: true,
+      cronSchedule: "17 * * * *",
+      latestNet: {
+        requestId: "9223372036854775807",
+        statusCode: 200,
+        hasError: false,
+      },
+    })
+  })
+})
 
 describe("advertising sync installation orchestration", () => {
   it("installs source read API and target runtime with Cron inactive in strict order", async () => {
@@ -115,11 +143,23 @@ describe("advertising sync Cron activation", () => {
     cronActive: false,
   }
   const receipt = {
+    version: 1,
     sourceProjectRef: "abcdefghijklmnopqrst",
     targetProjectRef: "bcdefghijklmnopqrstu",
     appCommit: "c".repeat(40),
     snapshotDigest: "d".repeat(64),
-    checks: { sourceUnchanged: true, targetSentinelUnchanged: true },
+    startedAt: "2026-09-02T01:00:00.000Z",
+    completedAt: "2026-09-02T01:01:00.000Z",
+    counts: { projects: 1, items: 2, histories: 3, images: 1 },
+    checks: {
+      advertisingEqual: true,
+      imageHashesEqual: true,
+      sourceUnchanged: true,
+      targetSentinelUnchanged: true,
+      targetLocalAdvertisingRemoved: true,
+      cleanupQueueEmpty: true,
+      cronInactive: true,
+    },
   }
 
   it("enables only after matching successful isolation acceptance", async () => {
@@ -150,6 +190,20 @@ describe("advertising sync Cron activation", () => {
         appCommit: receipt.appCommit,
         status: { ...successfulStatus, cleanupCount: 1 },
         acceptanceReceipt: receipt,
+        configureCron,
+      })
+    ).rejects.toThrow("自动同步启用条件未满足")
+    await expect(
+      setAdvertisingSyncCronActive({
+        active: true,
+        sourceProjectRef: receipt.sourceProjectRef,
+        targetProjectRef: receipt.targetProjectRef,
+        appCommit: receipt.appCommit,
+        status: successfulStatus,
+        acceptanceReceipt: {
+          ...receipt,
+          checks: { ...receipt.checks, imageHashesEqual: false },
+        },
         configureCron,
       })
     ).rejects.toThrow("自动同步启用条件未满足")

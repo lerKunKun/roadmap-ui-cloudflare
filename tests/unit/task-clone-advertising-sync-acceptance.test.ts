@@ -59,9 +59,12 @@ function createAdapters(failAt?: string) {
       fail(`source-${++sourceReads}`)
       return sourceEvidence()
     },
+    allocateSentinelIdentity: () => {
+      fail("allocate-sentinel")
+      return { projectId: "sentinel-project", itemId: "sentinel-item" }
+    },
     createSentinel: async () => {
       fail("create-sentinel")
-      return { projectId: "sentinel-project", itemId: "sentinel-item" }
     },
     readSentinel: async () => {
       fail("read-sentinel")
@@ -78,9 +81,12 @@ function createAdapters(failAt?: string) {
       return targetEvidence()
     },
     assertImageHashesEqual: async () => fail("images"),
+    allocateLocalAdvertisingIdentity: () => {
+      fail("allocate-local-ad")
+      return { itemId: "local-ad-item", voteId: "local-ad-vote" }
+    },
     createLocalAdvertisingMutation: async () => {
       fail("create-local-ad")
-      return { itemId: "local-ad-item", voteId: "local-ad-vote" }
     },
     localAdvertisingMutationExists: async () => {
       fail("local-ad-exists")
@@ -127,6 +133,7 @@ describe("advertising sync acceptance orchestration", () => {
     expect(events).toEqual([
       "clear-receipt",
       "source-1",
+      "allocate-sentinel",
       "create-sentinel",
       "read-sentinel",
       "trigger-1",
@@ -134,6 +141,7 @@ describe("advertising sync acceptance orchestration", () => {
       "read-target",
       "images",
       "read-sentinel",
+      "allocate-local-ad",
       "create-local-ad",
       "trigger-2",
       "local-ad-exists",
@@ -149,12 +157,14 @@ describe("advertising sync acceptance orchestration", () => {
 
   it.each([
     "source-1",
+    "allocate-sentinel",
     "create-sentinel",
     "read-sentinel",
     "trigger-1",
     "source-2",
     "read-target",
     "images",
+    "allocate-local-ad",
     "create-local-ad",
     "trigger-2",
     "local-ad-exists",
@@ -167,7 +177,10 @@ describe("advertising sync acceptance orchestration", () => {
       await expect(acceptAdvertisingSync(adapters)).rejects.toThrow(
         `failed:${stage}`
       )
-      if (events.includes("create-sentinel") && stage !== "create-sentinel") {
+      if (
+        events.includes("allocate-sentinel") &&
+        stage !== "allocate-sentinel"
+      ) {
         expect(events).toContain("cleanup")
       }
       expect(events).not.toContain("write-receipt")

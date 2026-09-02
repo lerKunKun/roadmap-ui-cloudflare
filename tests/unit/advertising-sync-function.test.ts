@@ -2,11 +2,23 @@ import { describe, expect, it } from "vitest"
 
 import {
   createAdvertisingSyncHandler,
+  readAdvertisingSyncJsonResponse,
   readAdvertisingSyncRuntimeConfig,
 } from "../../supabase/functions/sync-advertising/index"
 
 const SOURCE_REF = "abcdefghijklmnopqrst"
 const TARGET_REF = "bcdefghijklmnopqrstu"
+
+describe("advertising sync PostgREST responses", () => {
+  it("accepts a successful 204 response from a void RPC", async () => {
+    await expect(
+      readAdvertisingSyncJsonResponse(
+        new Response(null, { status: 204 }),
+        "TARGET_APPLY_FAILED"
+      )
+    ).resolves.toBeNull()
+  })
+})
 
 function runtimeValues() {
   return {
@@ -25,9 +37,12 @@ describe("advertising sync runtime config", () => {
     const values = runtimeValues()
     expect(
       readAdvertisingSyncRuntimeConfig(
-        (name) => values[name as keyof typeof values],
-      ),
-    ).toMatchObject({ sourceProjectRef: SOURCE_REF, targetProjectRef: TARGET_REF })
+        (name) => values[name as keyof typeof values]
+      )
+    ).toMatchObject({
+      sourceProjectRef: SOURCE_REF,
+      targetProjectRef: TARGET_REF,
+    })
   })
 
   it.each([
@@ -41,24 +56,24 @@ describe("advertising sync runtime config", () => {
   ])("rejects missing runtime value %s", (missing) => {
     const values: Record<string, string | undefined> = runtimeValues()
     values[missing] = undefined
-    expect(() => readAdvertisingSyncRuntimeConfig((name) => values[name])).toThrow(
-      "同步运行配置无效",
-    )
+    expect(() =>
+      readAdvertisingSyncRuntimeConfig((name) => values[name])
+    ).toThrow("同步运行配置无效")
   })
 
   it("rejects source/target reuse and target URL mismatch", () => {
     const same = { ...runtimeValues(), TARGET_SUPABASE_PROJECT_REF: SOURCE_REF }
     expect(() =>
       readAdvertisingSyncRuntimeConfig(
-        (name) => same[name as keyof typeof same],
-      ),
+        (name) => same[name as keyof typeof same]
+      )
     ).toThrow("同步运行配置无效")
 
     const mismatch = { ...runtimeValues(), SUPABASE_URL: "https://example.com" }
     expect(() =>
       readAdvertisingSyncRuntimeConfig(
-        (name) => mismatch[name as keyof typeof mismatch],
-      ),
+        (name) => mismatch[name as keyof typeof mismatch]
+      )
     ).toThrow("同步运行配置无效")
   })
 })
@@ -72,7 +87,7 @@ describe("advertising sync HTTP handler", () => {
     })
 
     const response = await handler(
-      new Request("https://target.example/sync", { method: "POST" }),
+      new Request("https://target.example/sync", { method: "POST" })
     )
     expect(response.status).toBe(401)
   })
@@ -80,7 +95,8 @@ describe("advertising sync HTTP handler", () => {
   it("rejects missing or invalid dedicated secret before running sync", async () => {
     let runs = 0
     const handler = createAdvertisingSyncHandler({
-      getEnv: (name) => runtimeValues()[name as keyof ReturnType<typeof runtimeValues>],
+      getEnv: (name) =>
+        runtimeValues()[name as keyof ReturnType<typeof runtimeValues>],
       run: async () => {
         runs += 1
         return { ok: true }
@@ -91,7 +107,7 @@ describe("advertising sync HTTP handler", () => {
       const headers = new Headers()
       if (provided) headers.set("x-roadmap-sync-secret", provided)
       const response = await handler(
-        new Request("https://target.example/sync", { method: "POST", headers }),
+        new Request("https://target.example/sync", { method: "POST", headers })
       )
       expect(response.status).toBe(401)
     }
@@ -114,8 +130,11 @@ describe("advertising sync HTTP handler", () => {
     const response = await handler(
       new Request("https://target.example/sync", {
         method: "POST",
-        headers: { "x-roadmap-sync-secret": values.ADVERTISING_SYNC_CRON_SECRET },
-      }),
+        headers: {
+          "x-roadmap-sync-secret": values.ADVERTISING_SYNC_CRON_SECRET,
+        },
+        body: "{}",
+      })
     )
 
     expect(response.status).toBe(200)
@@ -129,6 +148,35 @@ describe("advertising sync HTTP handler", () => {
     })
   })
 
+  it("rejects malformed JSON after authentication without running sync", async () => {
+    const values = runtimeValues()
+    let runs = 0
+    const handler = createAdvertisingSyncHandler({
+      getEnv: (name) => values[name as keyof typeof values],
+      run: async () => {
+        runs += 1
+        return { ok: true }
+      },
+    })
+    const response = await handler(
+      new Request("https://target.example/sync", {
+        method: "POST",
+        headers: {
+          "x-roadmap-sync-secret": values.ADVERTISING_SYNC_CRON_SECRET,
+        },
+        body: "{",
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: "INVALID_REQUEST",
+      message: "同步请求格式无效",
+    })
+    expect(runs).toBe(0)
+  })
+
   it("rejects non-POST methods and maps busy to 409", async () => {
     const values = runtimeValues()
     const handler = createAdvertisingSyncHandler({
@@ -138,15 +186,18 @@ describe("advertising sync HTTP handler", () => {
       },
     })
     const methodResponse = await handler(
-      new Request("https://target.example/sync", { method: "GET" }),
+      new Request("https://target.example/sync", { method: "GET" })
     )
     expect(methodResponse.status).toBe(405)
 
     const busyResponse = await handler(
       new Request("https://target.example/sync", {
         method: "POST",
-        headers: { "x-roadmap-sync-secret": values.ADVERTISING_SYNC_CRON_SECRET },
-      }),
+        headers: {
+          "x-roadmap-sync-secret": values.ADVERTISING_SYNC_CRON_SECRET,
+        },
+        body: "{}",
+      })
     )
     expect(busyResponse.status).toBe(409)
     expect(await busyResponse.json()).toEqual({

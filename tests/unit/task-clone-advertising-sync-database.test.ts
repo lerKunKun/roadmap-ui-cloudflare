@@ -16,6 +16,7 @@ describe("advertising sync target infrastructure", () => {
 
     expect(sql).toContain("public.roadmap_advertising_sync_state")
     expect(sql).toContain("public.roadmap_advertising_sync_object_cleanup")
+    expect(sql).toContain("public.roadmap_advertising_sync_http_requests")
     expect(sql).toContain("public.claim_advertising_roadmap_sync")
     expect(sql).toContain("public.apply_advertising_roadmap_snapshot")
     expect(sql).toContain("public.fail_advertising_roadmap_sync")
@@ -32,27 +33,34 @@ describe("advertising sync target infrastructure", () => {
     expect(sql).toContain("delete from public.roadmap_status_history")
     expect(sql).toContain("insert into public.roadmap_status_history")
     expect(sql).toContain("insert into public.roadmap_item_images")
-    expect(sql).toContain("alter table public.roadmap_advertising_sync_state enable row level security")
-    expect(sql).toContain("grant execute on function public.apply_advertising_roadmap_snapshot")
-    expect(sql).not.toMatch(/execute\s+format|\busing\s+payload_project_slug\b/i)
+    expect(sql).toContain(
+      "alter table public.roadmap_advertising_sync_state enable row level security"
+    )
+    expect(sql).toContain(
+      "grant execute on function public.apply_advertising_roadmap_snapshot"
+    )
+    expect(sql).not.toMatch(
+      /execute\s+format|\busing\s+payload_project_slug\b/i
+    )
   })
 
   it("rejects invalid target refs before producing SQL", () => {
     expect(() => buildAdvertisingSyncInfrastructureSql("../source")).toThrow(
-      "目标 Supabase Project Ref 无效",
+      "目标 Supabase Project Ref 无效"
     )
   })
 
   it("renders target infrastructure and rollback-only pgTAP as one executable script", () => {
     const sql = buildAdvertisingSyncTargetTestSql(
       TARGET_REF,
-      "begin; select plan(1); select ok(true, 'works'); select * from finish(); rollback;",
+      "begin; select plan(1); select ok(true, 'works'); select * from finish(); rollback;"
     )
     expect(sql).toContain("public.roadmap_clone_import_markers")
     expect(sql).toContain("public.apply_advertising_roadmap_snapshot")
     expect(sql.trimEnd()).toMatch(/rollback;$/)
-    expect(() => buildAdvertisingSyncTargetTestSql(TARGET_REF, "select 1"))
-      .toThrow("目标同步 pgTAP 测试 SQL 无效")
+    expect(() =>
+      buildAdvertisingSyncTargetTestSql(TARGET_REF, "select 1")
+    ).toThrow("目标同步 pgTAP 测试 SQL 无效")
   })
 })
 
@@ -68,6 +76,12 @@ describe("advertising sync Vault and Cron", () => {
     expect(sql).toContain("advertising_sync_function_url")
     expect(sql).toContain("advertising_sync_publishable_key")
     expect(sql).toContain("advertising_sync_cron_secret")
+    expect(sql).toContain(
+      "create extension if not exists supabase_vault with schema vault"
+    )
+    expect(sql).not.toContain(
+      "create extension if not exists vault with schema vault"
+    )
     expect(sql).not.toContain("SOURCE_SUPABASE_SECRET_KEY")
     expect(sql).not.toContain("source_secret")
   })
@@ -78,7 +92,7 @@ describe("advertising sync Vault and Cron", () => {
         functionUrl: "https://evil.example/functions/v1/sync-advertising",
         publishableKey: `sb_publishable_${"p".repeat(32)}`,
         cronSecret: "a".repeat(64),
-      }),
+      })
     ).toThrow("同步函数 URL 无效")
 
     expect(() =>
@@ -88,7 +102,7 @@ describe("advertising sync Vault and Cron", () => {
         publishableKey: `sb_publishable_${"p".repeat(32)}`,
         cronSecret: "a".repeat(64),
         sourceSecretKey: "sb_secret_forbidden",
-      } as never),
+      } as never)
     ).toThrow("Vault 配置包含禁止字段")
   })
 
@@ -100,6 +114,7 @@ describe("advertising sync Vault and Cron", () => {
       expect(sql).toContain("sync-advertising-roadmap-hourly")
       expect(sql).toContain("17 * * * *")
       expect(sql).toContain("net.http_post")
+      expect(sql).toContain("roadmap_advertising_sync_http_requests")
       expect(sql).toContain("x-roadmap-sync-secret")
       expect(sql).toContain("'apikey'")
     }
@@ -113,6 +128,9 @@ describe("advertising sync Vault and Cron", () => {
     expect(sql).toContain("last_snapshot_digest")
     expect(sql).toContain("cleanup_count")
     expect(sql).toContain("cron.job")
+    expect(sql).toContain("net._http_response")
+    expect(sql).toContain("status_code")
+    expect(sql).not.toContain("error_msg'")
     expect(sql).not.toContain("decrypted_secrets")
   })
 })

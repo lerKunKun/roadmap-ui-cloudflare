@@ -53,12 +53,20 @@ create table if not exists public.roadmap_advertising_sync_object_cleanup (
   )
 );
 
+create table if not exists public.roadmap_advertising_sync_http_requests (
+  request_id bigint primary key,
+  requested_at timestamptz not null default now()
+);
+
 alter table public.roadmap_advertising_sync_state enable row level security;
 alter table public.roadmap_advertising_sync_object_cleanup enable row level security;
+alter table public.roadmap_advertising_sync_http_requests enable row level security;
 revoke all on table public.roadmap_advertising_sync_state from anon, authenticated;
 revoke all on table public.roadmap_advertising_sync_object_cleanup from anon, authenticated;
+revoke all on table public.roadmap_advertising_sync_http_requests from anon, authenticated;
 grant all on table public.roadmap_advertising_sync_state to service_role;
 grant all on table public.roadmap_advertising_sync_object_cleanup to service_role;
+grant all on table public.roadmap_advertising_sync_http_requests to service_role;
 
 create or replace function public.claim_advertising_roadmap_sync(run_id uuid)
 returns boolean
@@ -445,19 +453,22 @@ export function buildAdvertisingSyncVaultSql(input) {
     ["advertising_sync_cron_secret", cronSecret],
   ]
   return `begin;
-create extension if not exists vault with schema vault;
+create extension if not exists supabase_vault with schema vault;
 do $vault$
 declare
   current_secret_id uuid;
 begin
 ${entries
   .map(
-    ([name, value]) => `  select id into current_secret_id from vault.secrets where name = '${name}';
+    ([
+      name,
+      value,
+    ]) => `  select id into current_secret_id from vault.secrets where name = '${name}';
   if current_secret_id is null then
     perform vault.create_secret(${encodedSqlText(value)}, '${name}', 'Roadmap advertising sync');
   else
     perform vault.update_secret(current_secret_id, ${encodedSqlText(value)}, '${name}', 'Roadmap advertising sync');
-  end if;`,
+  end if;`
   )
   .join("\n")}
 end;
@@ -477,15 +488,23 @@ select cron.schedule(
   'sync-advertising-roadmap-hourly',
   '17 * * * *',
   $cron$
-  select net.http_post(
-    url := (select decrypted_secret from vault.decrypted_secrets where name = 'advertising_sync_function_url'),
-    headers := jsonb_build_object(
-      'Content-Type', 'application/json',
-      'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'advertising_sync_publishable_key'),
-      'x-roadmap-sync-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'advertising_sync_cron_secret')
-    ),
-    body := jsonb_build_object('scheduledAt', clock_timestamp())
-  );
+  with requested as (
+    select net.http_post(
+      url := (select decrypted_secret from vault.decrypted_secrets where name = 'advertising_sync_function_url'),
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'advertising_sync_publishable_key'),
+        'x-roadmap-sync-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'advertising_sync_cron_secret')
+      ),
+      body := jsonb_build_object('scheduledAt', clock_timestamp())
+    ) as request_id
+  ), tracked as (
+    insert into public.roadmap_advertising_sync_http_requests (request_id)
+    select request_id from requested
+    returning request_id
+  )
+  delete from public.roadmap_advertising_sync_http_requests as old_request
+  where old_request.request_id <> (select request_id from tracked);
   $cron$
 );
 select cron.alter_job(
@@ -514,6 +533,20 @@ export function buildAdvertisingSyncStatusSql() {
     )
     from cron.job as job
     where job.jobname = 'sync-advertising-roadmap-hourly'
+  ),
+  'net', (
+    select jsonb_build_object(
+      'requestId', tracked.request_id::text,
+      'requestedAt', tracked.requested_at,
+      'statusCode', response.status_code,
+      'timedOut', coalesce(response.timed_out, false),
+      'hasError', response.error_msg is not null,
+      'receivedAt', response.created
+    )
+    from public.roadmap_advertising_sync_http_requests as tracked
+    left join net._http_response as response on response.id = tracked.request_id
+    order by tracked.requested_at desc
+    limit 1
   )
 ) as status
 from public.roadmap_advertising_sync_state as state

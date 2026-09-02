@@ -14,7 +14,6 @@ import {
   buildAdvertisingSyncInfrastructureSql,
   buildAdvertisingSyncStatusSql,
   buildAdvertisingSyncTargetTestSql,
-  buildAdvertisingSyncVaultSql,
 } from "./advertising-sync-database.mjs"
 import { runCaptured } from "./command.mjs"
 import {
@@ -121,7 +120,7 @@ export async function triggerAdvertisingSync({
  *     targetProjectRef?: string,
  *     appCommit?: string,
  *     snapshotDigest?: string,
- *     checks?: { sourceUnchanged?: boolean, targetSentinelUnchanged?: boolean }
+ *     checks?: Record<string, boolean>
  *   } | null,
  *   configureCron: (active: boolean) => Promise<unknown>
  * }} input
@@ -136,15 +135,32 @@ export async function setAdvertisingSyncCronActive({
   configureCron,
 }) {
   if (active === true) {
+    const requiredChecks = [
+      "advertisingEqual",
+      "imageHashesEqual",
+      "sourceUnchanged",
+      "targetSentinelUnchanged",
+      "targetLocalAdvertisingRemoved",
+      "cleanupQueueEmpty",
+      "cronInactive",
+    ]
     const accepted =
       status?.lastSnapshotDigest &&
       status.cleanupCount === 0 &&
+      acceptanceReceipt?.version === 1 &&
       acceptanceReceipt?.sourceProjectRef === sourceProjectRef &&
       acceptanceReceipt?.targetProjectRef === targetProjectRef &&
       acceptanceReceipt?.appCommit === appCommit &&
       acceptanceReceipt?.snapshotDigest === status.lastSnapshotDigest &&
-      acceptanceReceipt?.checks?.sourceUnchanged === true &&
-      acceptanceReceipt?.checks?.targetSentinelUnchanged === true
+      Number.isFinite(Date.parse(acceptanceReceipt?.startedAt ?? "")) &&
+      Number.isFinite(Date.parse(acceptanceReceipt?.completedAt ?? "")) &&
+      acceptanceReceipt?.counts?.projects === 1 &&
+      ["items", "histories", "images"].every(
+        (name) =>
+          Number.isInteger(acceptanceReceipt?.counts?.[name]) &&
+          acceptanceReceipt.counts[name] >= 0
+      ) &&
+      requiredChecks.every((name) => acceptanceReceipt?.checks?.[name] === true)
     if (!accepted) throw new Error("自动同步启用条件未满足")
   } else if (active !== false) {
     throw new Error("Cron active 状态无效")
@@ -153,7 +169,7 @@ export async function setAdvertisingSyncCronActive({
   return { active }
 }
 
-function normalizeStatus(raw) {
+export function normalizeAdvertisingSyncStatus(raw) {
   return {
     installed: Boolean(raw),
     lastAttemptAt: raw?.lastAttemptAt ?? null,
@@ -166,6 +182,18 @@ function normalizeStatus(raw) {
     cleanupCount: Number(raw?.cleanup_count ?? 0),
     cronActive: raw?.cron?.active === true,
     cronSchedule: raw?.cron?.schedule ?? null,
+    latestNet: raw?.net
+      ? {
+          requestId: String(raw.net.requestId),
+          requestedAt: raw.net.requestedAt ?? null,
+          statusCode: Number.isInteger(raw.net.statusCode)
+            ? raw.net.statusCode
+            : null,
+          timedOut: raw.net.timedOut === true,
+          hasError: raw.net.hasError === true,
+          receivedAt: raw.net.receivedAt ?? null,
+        }
+      : null,
   }
 }
 
@@ -232,7 +260,7 @@ export async function loadAdvertisingSyncRuntime() {
       operation: "读取广告同步状态",
       readOnly: true,
     })
-    return normalizeStatus(
+    return normalizeAdvertisingSyncStatus(
       parseDbQueryColumn(result.stdout, "status", "广告同步状态无效")
     )
   }
@@ -293,13 +321,13 @@ async function installCommand(runtime) {
         "sync-advertising"
       ),
     configureVault: () =>
-      runtime.targetQuery({
-        sql: buildAdvertisingSyncVaultSql({
-          functionUrl: `${runtime.targetInputs.SUPABASE_URL}/functions/v1/sync-advertising`,
-          publishableKey: runtime.targetInputs.SUPABASE_PUBLISHABLE_KEY,
-          cronSecret: runtime.targetInputs.ADVERTISING_SYNC_CRON_SECRET,
-        }),
-        operation: "配置广告同步 Vault",
+      runtime.supabase.configureAdvertisingSyncVault({
+        projectRef: runtime.targetInputs.SUPABASE_PROJECT_REF,
+        region: runtime.target.region,
+        databasePassword: runtime.targetInputs.SUPABASE_DB_PASSWORD,
+        functionUrl: `${runtime.targetInputs.SUPABASE_URL}/functions/v1/sync-advertising`,
+        publishableKey: runtime.targetInputs.SUPABASE_PUBLISHABLE_KEY,
+        cronSecret: runtime.targetInputs.ADVERTISING_SYNC_CRON_SECRET,
       }),
     configureCron: (active) =>
       runtime.targetQuery({
@@ -390,12 +418,33 @@ async function executeCommand(command) {
 
 async function main() {
   const result = await executeCommand(process.argv[2] ?? "status")
+  const counts = result?.lastCounts
+    ? ["projects", "items", "histories", "images"]
+        .map((name) => `${name}:${Number(result.lastCounts[name] ?? 0)}`)
+        .join(",")
+    : undefined
+  const netStatus = result?.latestNet
+    ? result.latestNet.timedOut
+      ? "timeout"
+      : result.latestNet.hasError
+        ? "error"
+        : result.latestNet.statusCode === null
+          ? "pending"
+          : `http-${result.latestNet.statusCode}`
+    : undefined
   const safeSummary = {
     installed: result?.installed,
     active: result?.active ?? result?.cronActive,
+    schedule: result?.cronSchedule,
+    lastAttemptAt: result?.lastAttemptAt,
     lastSuccessAt: result?.lastSuccessAt,
     digest: result?.lastSnapshotDigest?.slice(0, 12) ?? result?.digest,
+    counts,
+    durationMs: result?.lastDurationMs,
+    errorCode: result?.lastErrorCode,
+    busy: result?.busy,
     cleanupCount: result?.cleanupCount,
+    netStatus,
     checks: result?.checks,
     passed: result?.passed,
   }

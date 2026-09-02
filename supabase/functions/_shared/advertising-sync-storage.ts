@@ -161,6 +161,9 @@ export function createAdvertisingStorageDependencies({
       } catch {
         throw storageError("IMAGE_UNAVAILABLE", "目标图片上传失败")
       }
+      if (response.status === 409) {
+        throw storageError("IMAGE_CONFLICT", "目标图片路径存在内容冲突")
+      }
       if (!response.ok) {
         throw storageError("IMAGE_UNAVAILABLE", "目标图片上传失败")
       }
@@ -239,11 +242,24 @@ export async function prepareAdvertisingImages(
       }
     } else {
       attemptedUploads.push(image.storagePath)
-      await dependencies.uploadTarget(
-        image.storagePath,
-        source.bytes,
-        image.mimeType
-      )
+      try {
+        await dependencies.uploadTarget(
+          image.storagePath,
+          source.bytes,
+          image.mimeType
+        )
+      } catch (error) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === "IMAGE_CONFLICT"
+        ) {
+          const attemptedIndex = attemptedUploads.indexOf(image.storagePath)
+          if (attemptedIndex >= 0) attemptedUploads.splice(attemptedIndex, 1)
+        }
+        throw error
+      }
       successfulUploads.push(image.storagePath)
     }
     hydratedImages[index] = { ...image, sha256: sourceHash }

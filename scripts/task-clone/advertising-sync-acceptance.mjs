@@ -151,7 +151,8 @@ export async function acceptAdvertisingSync(adapters) {
   let failure = null
 
   try {
-    sentinel = await adapters.createSentinel()
+    sentinel = adapters.allocateSentinelIdentity()
+    await adapters.createSentinel(sentinel)
     sentinelBefore = await adapters.readSentinel(sentinel)
 
     await adapters.trigger()
@@ -162,7 +163,8 @@ export async function acceptAdvertisingSync(adapters) {
     await adapters.assertImageHashesEqual(sourceBefore.snapshot)
     assertSameSentinel(sentinelBefore, await adapters.readSentinel(sentinel))
 
-    localAdvertisingMutation = await adapters.createLocalAdvertisingMutation()
+    localAdvertisingMutation = adapters.allocateLocalAdvertisingIdentity()
+    await adapters.createLocalAdvertisingMutation(localAdvertisingMutation)
     await adapters.trigger()
     if (
       await adapters.localAdvertisingMutationExists(localAdvertisingMutation)
@@ -349,24 +351,27 @@ export function buildCleanupAcceptanceSql({
   const slug = assertSentinelSlug(sentinel?.slug)
   const localItemId = localAdvertisingMutation
     ? assertUuid(localAdvertisingMutation.itemId, "本地广告条目")
-    : "00000000-0000-4000-8000-000000000000"
+    : null
   const localVoteId = localAdvertisingMutation
     ? assertUuid(localAdvertisingMutation.voteId, "本地广告投票")
-    : "00000000-0000-4000-8000-000000000000"
+    : null
+  const voteIds = [`'${voteId}'::uuid`]
+  const itemIds = [`'${itemId}'::uuid`]
+  if (localVoteId) voteIds.push(`'${localVoteId}'::uuid`)
+  if (localItemId) itemIds.push(`'${localItemId}'::uuid`)
   return `begin;
 select pg_advisory_xact_lock(hashtextextended('roadmap:advertising-sync-acceptance', 0));
-delete from public.votes where id in ('${voteId}'::uuid, '${localVoteId}'::uuid);
+delete from public.votes where id in (${voteIds.join(", ")});
 delete from public.roadmap_status_history
-where roadmap_item_id in ('${itemId}'::uuid, '${localItemId}'::uuid);
-delete from public.roadmap_items
-where id = '${localItemId}'::uuid
-  or (id = '${itemId}'::uuid and project_id = '${projectId}'::uuid);
+where roadmap_item_id in (${itemIds.join(", ")});
+${localItemId ? `delete from public.roadmap_items where id = '${localItemId}'::uuid;` : ""}
+delete from public.roadmap_items where id = '${itemId}'::uuid and project_id = '${projectId}'::uuid;
 delete from public.projects where id = '${projectId}'::uuid and slug = '${slug}';
 do $verify$
 begin
   if exists (select 1 from public.projects where id = '${projectId}'::uuid or slug = '${slug}')
-    or exists (select 1 from public.roadmap_items where id in ('${itemId}'::uuid, '${localItemId}'::uuid))
-    or exists (select 1 from public.votes where id in ('${voteId}'::uuid, '${localVoteId}'::uuid))
+    or exists (select 1 from public.roadmap_items where id in (${itemIds.join(", ")}))
+    or exists (select 1 from public.votes where id in (${voteIds.join(", ")}))
   then
     raise exception 'advertising_sync_acceptance_cleanup_incomplete';
   end if;
@@ -508,8 +513,8 @@ function createProductionAdapters(runtime, appCommit) {
         contentDigest: contentDigest(evidence.snapshot),
       }
     },
-    async createSentinel() {
-      const identity = fixtureIdentity()
+    allocateSentinelIdentity: fixtureIdentity,
+    async createSentinel(identity) {
       await targetQuery({
         sql: buildCreateSentinelSql(
           identity,
@@ -517,7 +522,6 @@ function createProductionAdapters(runtime, appCommit) {
         ),
         operation: "创建 Task 隔离验收哨兵",
       })
-      return identity
     },
     readSentinel(identity) {
       return queryColumn(
@@ -546,13 +550,12 @@ function createProductionAdapters(runtime, appCommit) {
       ),
     assertImageHashesEqual: (snapshot) =>
       assertProductionImageHashes(runtime, snapshot),
-    async createLocalAdvertisingMutation() {
-      const identity = localAdvertisingIdentity()
+    allocateLocalAdvertisingIdentity: localAdvertisingIdentity,
+    async createLocalAdvertisingMutation(identity) {
       await targetQuery({
         sql: buildCreateLocalAdvertisingSql(identity),
         operation: "创建 Task 本地广告验收条目",
       })
-      return identity
     },
     async localAdvertisingMutationExists(identity) {
       const result = await queryColumn(
