@@ -389,6 +389,9 @@ verify_jwt = false
 [functions.vote]
 verify_jwt = false
 
+[functions.sync-advertising]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

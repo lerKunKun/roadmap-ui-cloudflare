@@ -194,6 +194,23 @@ async function main() {
     })
     assert(voteWithoutIp.status === 400, `投票缺少可信 IP 应返回 400，实际 ${voteWithoutIp.status}`)
 
+    const syncWithoutSecret = await postFunction("sync-advertising", {}, {
+      publishableKey,
+      origin: false,
+    })
+    assert(
+      syncWithoutSecret.status === 401,
+      `同步缺少专用密钥应返回 401，实际 ${syncWithoutSecret.status}`,
+    )
+    const syncGetResponse = await fetch(`${functionsBaseUrl}/sync-advertising`, {
+      method: "GET",
+      headers: { apikey: publishableKey },
+    })
+    assert(
+      syncGetResponse.status === 405,
+      `同步 GET 应返回 405，实际 ${syncGetResponse.status}`,
+    )
+
     let imageChecks = 0
     if (process.env.SUPABASE_FUNCTIONS_TEST_IMAGES === "1") {
       const validImage = await postMultipartSuggestion(
@@ -232,7 +249,7 @@ async function main() {
       imageChecks = 2
     }
 
-  process.stdout.write(`Edge Function HTTP integration: ${20 + imageChecks} checks passed\n`)
+  process.stdout.write(`Edge Function HTTP integration: ${22 + imageChecks} checks passed\n`)
 }
 
 await main()
