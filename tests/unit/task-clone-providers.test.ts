@@ -1,4 +1,4 @@
-import { X509Certificate } from "node:crypto"
+import { createHash, X509Certificate } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
@@ -62,6 +62,94 @@ it("runs npm scripts through the npm CLI on Windows", () => {
 })
 
 describe("task clone Supabase provider", () => {
+  it("applies only the checksum-matched advertising export migration to the protected source", async () => {
+    const events: string[] = []
+    const migrationPath = resolve(
+      process.cwd(),
+      "supabase/migrations/20260902090000_advertising_sync_export.sql",
+    )
+    const migration = await readFile(migrationPath, "utf8")
+    const expectedSha256 = createHash("sha256").update(migration).digest("hex")
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      pgClientFactory: async () => ({
+        connect: async () => events.push("connect"),
+        query: async (sql: string) => {
+          events.push(sql)
+          return { rows: [] }
+        },
+        end: async () => events.push("end"),
+      }),
+    })
+
+    await expect(
+      provider.applyProtectedSourceMigration({
+        projectRef: "abcdefghijklmnopqrst",
+        migrationPath,
+        expectedSha256,
+        region: "us-west-2",
+        databasePassword: "source-password",
+      }),
+    ).resolves.toEqual({ applied: true, sha256: expectedSha256 })
+
+    expect(events).toEqual([
+      "connect",
+      "BEGIN",
+      migration,
+      "COMMIT",
+      "end",
+    ])
+  })
+
+  it("rejects an altered or different protected-source migration before connecting", async () => {
+    let connected = false
+    const unsafeMigration = "delete from public.projects;"
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+      fetchImpl: async () => Response.json({}),
+      migrationReadFile: async () => unsafeMigration,
+      pgClientFactory: async () => ({
+        connect: async () => {
+          connected = true
+        },
+        query: async () => ({ rows: [] }),
+        end: async () => {},
+      }),
+    })
+    const approvedPath = resolve(
+      process.cwd(),
+      "supabase/migrations/20260902090000_advertising_sync_export.sql",
+    )
+
+    await expect(
+      provider.applyProtectedSourceMigration({
+        projectRef: "abcdefghijklmnopqrst",
+        migrationPath: approvedPath,
+        expectedSha256: createHash("sha256")
+          .update(unsafeMigration)
+          .digest("hex"),
+        region: "us-west-2",
+        databasePassword: "source-password",
+      }),
+    ).rejects.toThrow("源迁移内容不在允许范围内")
+
+    await expect(
+      provider.applyProtectedSourceMigration({
+        projectRef: "abcdefghijklmnopqrst",
+        migrationPath: resolve(process.cwd(), "supabase/migrations/other.sql"),
+        expectedSha256: "a".repeat(64),
+        region: "us-west-2",
+        databasePassword: "source-password",
+      }),
+    ).rejects.toThrow("源迁移文件不在允许范围内")
+    expect(connected).toBe(false)
+  })
+
   it("configures bounded PostgreSQL connection, statement, lock, and idle timeouts", async () => {
     let config: Record<string, unknown> | undefined
     class FakeClient {

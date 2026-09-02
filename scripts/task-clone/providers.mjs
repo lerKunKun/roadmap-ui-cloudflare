@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 const SUPABASE_API = "https://api.supabase.com/v1"
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4"
@@ -191,6 +192,7 @@ export function createSupabaseProvider({
   runCommand,
   fetchImpl = fetch,
   pgClientFactory = createPgClient,
+  migrationReadFile = readFile,
   workdir = process.cwd(),
 }) {
   const commandEnv = { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken }
@@ -371,6 +373,77 @@ export function createSupabaseProvider({
     }
   }
 
+  async function applyProtectedSourceMigration({
+    projectRef,
+    region,
+    databasePassword,
+    migrationPath,
+    expectedSha256,
+  }) {
+    if (!protectedProjectRef || projectRef !== protectedProjectRef) {
+      throw new Error("源迁移目标不是受保护源项目")
+    }
+    const approvedPath = resolve(
+      workdir,
+      "supabase/migrations/20260902090000_advertising_sync_export.sql",
+    )
+    if (resolve(migrationPath) !== approvedPath) {
+      throw new Error("源迁移文件不在允许范围内")
+    }
+
+    const migration = await migrationReadFile(approvedPath, "utf8")
+    const sha256 = createHash("sha256").update(migration).digest("hex")
+    if (!/^[a-f0-9]{64}$/.test(expectedSha256 ?? "") || sha256 !== expectedSha256) {
+      throw new Error("源迁移校验和不匹配")
+    }
+    const forbidden =
+      /\b(insert|update|delete|truncate|drop|alter|call|do)\b|\b(create\s+(table|schema|extension|trigger|policy|view))\b|\b(auth|vault|cron|storage)\s*\./i
+    const required = [
+      /create\s+or\s+replace\s+function\s+public\.export_advertising_roadmap_snapshot\s*\(\s*\)/i,
+      /where\s+slug\s*=\s*'advertising-system'/i,
+      /security\s+definer/i,
+      /set\s+search_path\s*=\s*''/i,
+      /grant\s+execute\s+on\s+function\s+public\.export_advertising_roadmap_snapshot\s*\(\s*\)\s+to\s+service_role/i,
+    ]
+    if (forbidden.test(migration) || required.some((pattern) => !pattern.test(migration))) {
+      throw new Error("源迁移内容不在允许范围内")
+    }
+
+    let client
+    let transactionOpen = false
+    let operationError = null
+    try {
+      client = await pgClientFactory(
+        pgDatabaseUrl({ projectRef, region, databasePassword }),
+      )
+      await client.connect()
+      await client.query("BEGIN")
+      transactionOpen = true
+      await client.query(migration)
+      await client.query("COMMIT")
+      transactionOpen = false
+      return { applied: true, sha256 }
+    } catch (error) {
+      operationError = error
+      if (client && transactionOpen) {
+        try {
+          await client.query("ROLLBACK")
+        } catch {
+          // Preserve the approved migration error.
+        }
+      }
+      throw new Error("应用源只读导出迁移失败")
+    } finally {
+      if (client) {
+        try {
+          await client.end()
+        } catch {
+          if (!operationError) throw new Error("关闭源数据库连接失败")
+        }
+      }
+    }
+  }
+
   async function applyMigrations({ projectRef, region, databasePassword, dryRun = false }) {
     assertMutableProject(projectRef)
     const args = [
@@ -535,6 +608,7 @@ export function createSupabaseProvider({
     waitProjectHealthy,
     getApiKeys,
     queryDatabase,
+    applyProtectedSourceMigration,
     applyMigrations,
     configureAuth,
     getAuthConfig,
