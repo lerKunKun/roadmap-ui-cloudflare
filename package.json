@@ -21,6 +21,12 @@
     "deploy:task:deploy": "node scripts/task-clone/run.mjs deploy",
     "deploy:task:domain": "node scripts/task-clone/run.mjs domain",
     "deploy:task:smoke": "node scripts/task-clone/smoke.mjs",
+    "sync:advertising:install": "node scripts/task-clone/advertising-sync.mjs install",
+    "sync:advertising:trigger": "node scripts/task-clone/advertising-sync.mjs trigger",
+    "sync:advertising:status": "node scripts/task-clone/advertising-sync.mjs status",
+    "sync:advertising:enable": "node scripts/task-clone/advertising-sync.mjs enable",
+    "sync:advertising:disable": "node scripts/task-clone/advertising-sync.mjs disable",
+    "supabase:test:advertising-target": "node scripts/task-clone/advertising-sync.mjs test-target",
     "admin-password": "node scripts/generate-admin-password.mjs",
     "supabase:test": "supabase test db"
   },

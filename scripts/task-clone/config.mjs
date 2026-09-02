@@ -20,6 +20,7 @@ const TARGET_FIELDS = [
   "ADMIN_EMAIL",
   "ADMIN_PASSWORD",
   "VOTE_IP_SALT",
+  "ADVERTISING_SYNC_CRON_SECRET",
 ]
 
 function strongPassword(randomBytes) {
@@ -31,6 +32,7 @@ export function generateTargetSecrets(randomBytes = secureRandomBytes) {
     databasePassword: strongPassword(randomBytes),
     adminPassword: strongPassword(randomBytes),
     voteIpSalt: randomBytes(32).toString("hex"),
+    advertisingSyncCronSecret: randomBytes(32).toString("hex"),
   }
 }
 
@@ -55,16 +57,20 @@ export function validateTaskIdentity(source, target) {
     if (!condition) errors.push(`${field}：${message}`)
   }
 
-  add("ROADMAP_DOMAIN", target.ROADMAP_DOMAIN === TASK_DOMAIN, `必须是 ${TASK_DOMAIN}`)
+  add(
+    "ROADMAP_DOMAIN",
+    target.ROADMAP_DOMAIN === TASK_DOMAIN,
+    `必须是 ${TASK_DOMAIN}`
+  )
   add(
     "CLOUDFLARE_PAGES_PROJECT",
     target.CLOUDFLARE_PAGES_PROJECT === TASK_PAGES_PROJECT,
-    `必须是 ${TASK_PAGES_PROJECT}`,
+    `必须是 ${TASK_PAGES_PROJECT}`
   )
   add(
     "SUPABASE_PROJECT_REF",
     /^[a-z0-9]{20}$/.test(target.SUPABASE_PROJECT_REF ?? ""),
-    "格式无效",
+    "格式无效"
   )
   if (target.SUPABASE_PROJECT_REF === source.SUPABASE_PROJECT_REF) {
     errors.push("SUPABASE_PROJECT_REF：必须与源项目不同")
@@ -73,39 +79,44 @@ export function validateTaskIdentity(source, target) {
     "SUPABASE_URL",
     target.SUPABASE_URL ===
       `https://${target.SUPABASE_PROJECT_REF}.supabase.co`,
-    "必须与目标 Project Ref 对应",
+    "必须与目标 Project Ref 对应"
   )
   add(
     "SUPABASE_PUBLISHABLE_KEY",
     /^sb_publishable_[A-Za-z0-9_-]{20,}$/.test(
-      target.SUPABASE_PUBLISHABLE_KEY ?? "",
+      target.SUPABASE_PUBLISHABLE_KEY ?? ""
     ),
-    "格式无效",
+    "格式无效"
   )
   add(
     "SUPABASE_SECRET_KEY",
     /^sb_secret_[A-Za-z0-9_-]{20,}$/.test(target.SUPABASE_SECRET_KEY ?? ""),
-    "格式无效",
+    "格式无效"
   )
   add(
     "SUPABASE_DB_PASSWORD",
     isStrongPassword(target.SUPABASE_DB_PASSWORD),
-    "至少 32 位，并包含大小写字母、数字和特殊字符",
+    "至少 32 位，并包含大小写字母、数字和特殊字符"
   )
   add(
     "ADMIN_EMAIL",
     target.ADMIN_EMAIL === TASK_ADMIN_EMAIL,
-    `必须是 ${TASK_ADMIN_EMAIL}`,
+    `必须是 ${TASK_ADMIN_EMAIL}`
   )
   add(
     "ADMIN_PASSWORD",
     isStrongPassword(target.ADMIN_PASSWORD),
-    "至少 32 位，并包含大小写字母、数字和特殊字符",
+    "至少 32 位，并包含大小写字母、数字和特殊字符"
   )
   add(
     "VOTE_IP_SALT",
     /^[a-f0-9]{64}$/.test(target.VOTE_IP_SALT ?? ""),
-    "必须是 64 位小写十六进制随机值",
+    "必须是 64 位小写十六进制随机值"
+  )
+  add(
+    "ADVERTISING_SYNC_CRON_SECRET",
+    /^[a-f0-9]{64}$/.test(target.ADVERTISING_SYNC_CRON_SECRET ?? ""),
+    "必须是 64 位小写十六进制随机值"
   )
   if (target.VOTE_IP_SALT === source.VOTE_IP_SALT) {
     errors.push("VOTE_IP_SALT：必须与源实例不同")
@@ -127,7 +138,9 @@ export function validateTaskIdentity(source, target) {
 export function assertTaskIdentity(source, target) {
   const errors = validateTaskIdentity(source, target)
   if (errors.length > 0) {
-    throw new Error(`目标部署配置无效（${errors.length} 项）：${errors.join("；")}`)
+    throw new Error(
+      `目标部署配置无效（${errors.length} 项）：${errors.join("；")}`
+    )
   }
   return target
 }
@@ -163,7 +176,7 @@ export async function writeTargetInputsAtomic(path, values, options = {}) {
 
   const temporary = resolve(
     dirname(destination),
-    `.${process.pid}-${secureRandomBytes(6).toString("hex")}.tmp`,
+    `.${process.pid}-${secureRandomBytes(6).toString("hex")}.tmp`
   )
   const handle = await open(temporary, "wx", 0o600)
   try {
@@ -179,4 +192,26 @@ export async function writeTargetInputsAtomic(path, values, options = {}) {
     await unlink(temporary).catch(() => {})
     throw error
   }
+}
+
+export async function ensureAdvertisingSyncCronSecret(
+  path,
+  expectedProjectRef,
+  randomBytes = secureRandomBytes
+) {
+  const destination = resolve(path)
+  const existing = parseTaskInputs(await readFile(destination, "utf8"))
+  if (existing.SUPABASE_PROJECT_REF !== expectedProjectRef) {
+    throw new Error("目标配置属于其他 Supabase 项目")
+  }
+  if (/^[a-f0-9]{64}$/.test(existing.ADVERTISING_SYNC_CRON_SECRET ?? "")) {
+    return existing.ADVERTISING_SYNC_CRON_SECRET
+  }
+  const secret = randomBytes(32).toString("hex")
+  await writeTargetInputsAtomic(
+    destination,
+    { ...existing, ADVERTISING_SYNC_CRON_SECRET: secret },
+    { expectedProjectRef }
+  )
+  return secret
 }

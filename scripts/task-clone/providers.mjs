@@ -94,7 +94,7 @@ async function responseJson(response, provider, allowNotFound = false) {
       response.headers.get("cf-ray") ?? response.headers.get("x-request-id")
     throw new ProviderError(
       `${provider.toUpperCase()}_REQUEST_FAILED`,
-      `${provider} 请求失败（HTTP ${response.status}${requestId ? `，请求 ${requestId}` : ""}）`,
+      `${provider} 请求失败（HTTP ${response.status}${requestId ? `，请求 ${requestId}` : ""}）`
     )
   }
   return provider === "Cloudflare" ? value.result : value
@@ -102,7 +102,8 @@ async function responseJson(response, provider, allowNotFound = false) {
 
 function collectStrings(value, result = []) {
   if (typeof value === "string") result.push(value)
-  else if (Array.isArray(value)) value.forEach((entry) => collectStrings(entry, result))
+  else if (Array.isArray(value))
+    value.forEach((entry) => collectStrings(entry, result))
   else if (value && typeof value === "object") {
     Object.values(value).forEach((entry) => collectStrings(entry, result))
   }
@@ -141,7 +142,7 @@ export async function createPgClient(connectionString, dependencies = {}) {
   const readFileImpl = dependencies.readFileImpl ?? readFile
   const ca = await readFileImpl(
     new URL("../../supabase/certificates/prod-ca-2021.crt", import.meta.url),
-    "utf8",
+    "utf8"
   )
   return /** @type {PgClient} */ (
     new Client({
@@ -155,15 +156,17 @@ export async function createPgClient(connectionString, dependencies = {}) {
 
 function assertSingleReadOnlyQuery(sql, errorMessage) {
   const trimmed = sql.trim()
-  const statement = trimmed.endsWith(";") ? trimmed.slice(0, -1).trimEnd() : trimmed
+  const statement = trimmed.endsWith(";")
+    ? trimmed.slice(0, -1).trimEnd()
+    : trimmed
   if (
     !/^(select|with)\b/i.test(statement) ||
     statement.includes(";") ||
     /\b(begin|start\s+transaction|commit|rollback|savepoint|release|set\s+transaction|prepare\s+transaction)\b/i.test(
-      statement,
+      statement
     ) ||
     /\b(insert|update|delete|truncate|drop|alter|create|grant|revoke|call|do)\b/i.test(
-      statement,
+      statement
     )
   ) {
     throw new Error(errorMessage)
@@ -179,7 +182,10 @@ function isRowProducingResult(result) {
 function safePostgresErrorCode(error, databasePassword) {
   const candidate = typeof error?.code === "string" ? error.code : ""
   if (candidate === databasePassword) return "query"
-  if (/^[0-9A-Z]{5}$/.test(candidate) || SAFE_POSTGRES_ERROR_CODES.has(candidate)) {
+  if (
+    /^[0-9A-Z]{5}$/.test(candidate) ||
+    SAFE_POSTGRES_ERROR_CODES.has(candidate)
+  ) {
     return candidate
   }
   return "query"
@@ -209,7 +215,11 @@ export function createSupabaseProvider({
   }
 
   function assertProtectedReadOnly(projectRef, sql, readOnly) {
-    if (protectedProjectRef && projectRef === protectedProjectRef && readOnly !== true) {
+    if (
+      protectedProjectRef &&
+      projectRef === protectedProjectRef &&
+      readOnly !== true
+    ) {
       throw new Error("拒绝修改源 Supabase 项目")
     }
     if (readOnly === true) {
@@ -217,7 +227,7 @@ export function createSupabaseProvider({
         sql,
         protectedProjectRef === projectRef
           ? "拒绝修改源 Supabase 项目"
-          : "拒绝执行非只读数据库查询",
+          : "拒绝执行非只读数据库查询"
       )
     }
   }
@@ -226,7 +236,7 @@ export function createSupabaseProvider({
     const result = await runNpx(
       runCommand,
       ["supabase", "projects", "list", "--output-format", "json"],
-      { cwd: workdir, env: commandEnv, operation: "读取 Supabase 项目列表" },
+      { cwd: workdir, env: commandEnv, operation: "读取 Supabase 项目列表" }
     )
     const parsed = parseCommandJson(result.stdout, "Supabase 项目列表结果无效")
     const projects = Array.isArray(parsed) ? parsed : parsed.projects
@@ -234,7 +244,12 @@ export function createSupabaseProvider({
     return projects
   }
 
-  async function createProject({ name, organizationId, region, databasePassword }) {
+  async function createProject({
+    name,
+    organizationId,
+    region,
+    databasePassword,
+  }) {
     const result = await runNpx(
       runCommand,
       [
@@ -253,7 +268,7 @@ export function createSupabaseProvider({
         "--output-format",
         "json",
       ],
-      { cwd: workdir, env: commandEnv, operation: "创建目标 Supabase 项目" },
+      { cwd: workdir, env: commandEnv, operation: "创建目标 Supabase 项目" }
     )
     const parsed = parseCommandJson(result.stdout, "Supabase 项目创建结果无效")
     const project = parsed.project ?? parsed
@@ -266,10 +281,13 @@ export function createSupabaseProvider({
 
   async function waitProjectHealthy(projectRef, options = {}) {
     const attempts = options.attempts ?? 60
-    const delay = options.delay ?? ((milliseconds) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds)))
+    const delay =
+      options.delay ??
+      ((milliseconds) =>
+        new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds)))
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const project = (await listProjects()).find(
-        (candidate) => (candidate.ref ?? candidate.id) === projectRef,
+        (candidate) => (candidate.ref ?? candidate.id) === projectRef
       )
       if (project?.status === "ACTIVE_HEALTHY") return project
       if (project?.status?.includes("FAILED")) {
@@ -293,14 +311,17 @@ export function createSupabaseProvider({
         "--output-format",
         "json",
       ],
-      { cwd: workdir, env: commandEnv, operation: "读取目标 Supabase API 密钥" },
+      { cwd: workdir, env: commandEnv, operation: "读取目标 Supabase API 密钥" }
     )
     const values = collectStrings(
-      parseCommandJson(result.stdout, "Supabase API 密钥结果无效"),
+      parseCommandJson(result.stdout, "Supabase API 密钥结果无效")
     )
-    const publishableKey = values.find((value) => value.startsWith("sb_publishable_"))
+    const publishableKey = values.find((value) =>
+      value.startsWith("sb_publishable_")
+    )
     const secretKey = values.find((value) => value.startsWith("sb_secret_"))
-    if (!publishableKey || !secretKey) throw new Error("Supabase API 密钥结果无效")
+    if (!publishableKey || !secretKey)
+      throw new Error("Supabase API 密钥结果无效")
     return { publishableKey, secretKey }
   }
 
@@ -330,12 +351,12 @@ export function createSupabaseProvider({
     let readOnlyTransactionOpen = false
     try {
       client = await pgClientFactory(
-        pgDatabaseUrl({ projectRef, region, databasePassword }),
+        pgDatabaseUrl({ projectRef, region, databasePassword })
       )
       await client.connect()
       if (readOnly) {
         await client.query(
-          "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+          "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
         )
         readOnlyTransactionOpen = true
       }
@@ -367,7 +388,8 @@ export function createSupabaseProvider({
         try {
           await client.end()
         } catch {
-          if (!operationError) throw new Error(`${operation}失败（关闭 PostgreSQL 连接）`)
+          if (!operationError)
+            throw new Error(`${operation}失败（关闭 PostgreSQL 连接）`)
         }
       }
     }
@@ -385,7 +407,7 @@ export function createSupabaseProvider({
     }
     const approvedPath = resolve(
       workdir,
-      "supabase/migrations/20260902090000_advertising_sync_export.sql",
+      "supabase/migrations/20260902090000_advertising_sync_export.sql"
     )
     if (resolve(migrationPath) !== approvedPath) {
       throw new Error("源迁移文件不在允许范围内")
@@ -393,7 +415,10 @@ export function createSupabaseProvider({
 
     const migration = await migrationReadFile(approvedPath, "utf8")
     const sha256 = createHash("sha256").update(migration).digest("hex")
-    if (!/^[a-f0-9]{64}$/.test(expectedSha256 ?? "") || sha256 !== expectedSha256) {
+    if (
+      !/^[a-f0-9]{64}$/.test(expectedSha256 ?? "") ||
+      sha256 !== expectedSha256
+    ) {
       throw new Error("源迁移校验和不匹配")
     }
     const forbidden =
@@ -405,7 +430,10 @@ export function createSupabaseProvider({
       /set\s+search_path\s*=\s*''/i,
       /grant\s+execute\s+on\s+function\s+public\.export_advertising_roadmap_snapshot\s*\(\s*\)\s+to\s+service_role/i,
     ]
-    if (forbidden.test(migration) || required.some((pattern) => !pattern.test(migration))) {
+    if (
+      forbidden.test(migration) ||
+      required.some((pattern) => !pattern.test(migration))
+    ) {
       throw new Error("源迁移内容不在允许范围内")
     }
 
@@ -414,7 +442,7 @@ export function createSupabaseProvider({
     let operationError = null
     try {
       client = await pgClientFactory(
-        pgDatabaseUrl({ projectRef, region, databasePassword }),
+        pgDatabaseUrl({ projectRef, region, databasePassword })
       )
       await client.connect()
       await client.query("BEGIN")
@@ -444,7 +472,12 @@ export function createSupabaseProvider({
     }
   }
 
-  async function applyMigrations({ projectRef, region, databasePassword, dryRun = false }) {
+  async function applyMigrations({
+    projectRef,
+    region,
+    databasePassword,
+    dryRun = false,
+  }) {
     assertMutableProject(projectRef)
     const args = [
       "supabase",
@@ -487,7 +520,7 @@ export function createSupabaseProvider({
           disable_signup: true,
           external_email_enabled: true,
         }),
-      },
+      }
     )
     await responseJson(configResponse, "Supabase")
 
@@ -500,7 +533,10 @@ export function createSupabaseProvider({
     }
 
     const users = await listAuthUsers({ projectUrl, secretKey })
-    if (users.length > 1 || (users.length === 1 && users[0].email !== adminEmail)) {
+    if (
+      users.length > 1 ||
+      (users.length === 1 && users[0].email !== adminEmail)
+    ) {
       throw new Error("目标 Auth 已存在非预期用户")
     }
     const existing = users[0]
@@ -522,7 +558,7 @@ export function createSupabaseProvider({
               email: adminEmail,
               password: adminPassword,
               email_confirm: true,
-            },
+            }
       ),
     })
     await responseJson(adminResponse, "Supabase")
@@ -537,7 +573,7 @@ export function createSupabaseProvider({
           "User-Agent": "task-roadmap-clone/1.0",
         },
         body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-      },
+      }
     )
     const login = await responseJson(loginResponse, "Supabase")
     if (!login?.access_token) throw new Error("目标管理员密码验证失败")
@@ -549,7 +585,7 @@ export function createSupabaseProvider({
       await fetchImpl(`${SUPABASE_API}/projects/${projectRef}/config/auth`, {
         headers: managementHeaders,
       }),
-      "Supabase",
+      "Supabase"
     )
   }
 
@@ -562,10 +598,10 @@ export function createSupabaseProvider({
           Authorization: `Bearer ${secretKey}`,
           "User-Agent": "task-roadmap-clone/1.0",
         },
-      },
+      }
     )
     const result = await responseJson(response, "Supabase")
-    return Array.isArray(result) ? result : result.users ?? []
+    return Array.isArray(result) ? result : (result.users ?? [])
   }
 
   async function setEdgeSecrets({ projectRef, voteIpSalt }) {
@@ -574,31 +610,109 @@ export function createSupabaseProvider({
     return withTemporaryFile("task-roadmap-secrets", contents, (path) =>
       runNpx(
         runCommand,
-        ["supabase", "secrets", "set", "--env-file", path, "--project-ref", projectRef],
-        { cwd: workdir, env: commandEnv, operation: "设置目标 Edge Function Secrets" },
-      ),
+        [
+          "supabase",
+          "secrets",
+          "set",
+          "--env-file",
+          path,
+          "--project-ref",
+          projectRef,
+        ],
+        {
+          cwd: workdir,
+          env: commandEnv,
+          operation: "设置目标 Edge Function Secrets",
+        }
+      )
+    )
+  }
+
+  async function setAdvertisingSyncEdgeSecrets({
+    targetProjectRef,
+    cronSecret,
+    sourceUrl,
+    sourceSecretKey,
+    sourceProjectRef,
+  }) {
+    assertMutableProject(targetProjectRef)
+    if (
+      !/^[a-z0-9]{20}$/.test(sourceProjectRef ?? "") ||
+      sourceProjectRef !== protectedProjectRef ||
+      targetProjectRef === sourceProjectRef ||
+      sourceUrl !== `https://${sourceProjectRef}.supabase.co` ||
+      !/^sb_secret_[A-Za-z0-9_-]{20,}$/.test(sourceSecretKey ?? "") ||
+      !/^[a-f0-9]{64}$/.test(cronSecret ?? "")
+    ) {
+      throw new Error("广告同步 Edge Secrets 配置无效")
+    }
+    const contents = [
+      ["ADVERTISING_SYNC_CRON_SECRET", cronSecret],
+      ["SOURCE_SUPABASE_URL", sourceUrl],
+      ["SOURCE_SUPABASE_SECRET_KEY", sourceSecretKey],
+      ["SOURCE_SUPABASE_PROJECT_REF", sourceProjectRef],
+      ["TARGET_SUPABASE_PROJECT_REF", targetProjectRef],
+    ]
+      .map(([name, value]) => `${name}=${JSON.stringify(value)}`)
+      .join("\n")
+    return withTemporaryFile(
+      "task-roadmap-advertising-sync-secrets",
+      `${contents}\n`,
+      (path) =>
+        runNpx(
+          runCommand,
+          [
+            "supabase",
+            "secrets",
+            "set",
+            "--env-file",
+            path,
+            "--project-ref",
+            targetProjectRef,
+          ],
+          {
+            cwd: workdir,
+            env: commandEnv,
+            operation: "设置广告同步 Edge Function Secrets",
+          }
+        )
+    )
+  }
+
+  async function deployEdgeFunction(projectRef, functionName) {
+    assertMutableProject(projectRef)
+    if (
+      !new Set(["submit-suggestion", "vote", "sync-advertising"]).has(
+        functionName
+      )
+    ) {
+      throw new Error("Edge Function 不在允许列表")
+    }
+    return runNpx(
+      runCommand,
+      [
+        "supabase",
+        "functions",
+        "deploy",
+        functionName,
+        "--project-ref",
+        projectRef,
+        "--use-api",
+        "--import-map",
+        "supabase/functions/deno.json",
+        "--no-verify-jwt",
+      ],
+      {
+        cwd: workdir,
+        env: commandEnv,
+        operation: `部署目标函数 ${functionName}`,
+      }
     )
   }
 
   async function deployEdgeFunctions(projectRef) {
-    assertMutableProject(projectRef)
     for (const functionName of ["submit-suggestion", "vote"]) {
-      await runNpx(
-        runCommand,
-        [
-          "supabase",
-          "functions",
-          "deploy",
-          functionName,
-          "--project-ref",
-          projectRef,
-          "--use-api",
-          "--import-map",
-          "supabase/functions/deno.json",
-          "--no-verify-jwt",
-        ],
-        { cwd: workdir, env: commandEnv, operation: `部署目标函数 ${functionName}` },
-      )
+      await deployEdgeFunction(projectRef, functionName)
     }
   }
 
@@ -614,6 +728,8 @@ export function createSupabaseProvider({
     getAuthConfig,
     listAuthUsers,
     setEdgeSecrets,
+    setAdvertisingSyncEdgeSecrets,
+    deployEdgeFunction,
     deployEdgeFunctions,
   }
 }
@@ -651,7 +767,7 @@ export function createCloudflareProvider({
         headers: { ...headers, ...options.headers },
       }),
       "Cloudflare",
-      allowNotFound,
+      allowNotFound
     )
   }
 
@@ -660,11 +776,14 @@ export function createCloudflareProvider({
     const existing = await responseJson(
       await fetchImpl(`${projectBase}/${TARGET_PAGES_PROJECT}`, { headers }),
       "Cloudflare",
-      true,
+      true
     )
     if (existing) {
       if (existing.name !== TARGET_PAGES_PROJECT) {
-        throw new ProviderError("PAGES_PROJECT_CONFLICT", "Cloudflare Pages 项目不匹配")
+        throw new ProviderError(
+          "PAGES_PROJECT_CONFLICT",
+          "Cloudflare Pages 项目不匹配"
+        )
       }
       return existing
     }
@@ -677,7 +796,7 @@ export function createCloudflareProvider({
           production_branch: "master",
         }),
       }),
-      "Cloudflare",
+      "Cloudflare"
     )
   }
 
@@ -685,7 +804,7 @@ export function createCloudflareProvider({
     assertMutableTarget()
     const targetUrl = new URL(supabaseUrl)
     const targetMatch = /^([a-z0-9]{20})\.supabase\.co$/.exec(
-      targetUrl.hostname,
+      targetUrl.hostname
     )
     if (
       targetUrl.protocol !== "https:" ||
@@ -696,7 +815,8 @@ export function createCloudflareProvider({
     }
     if (
       protectedSupabaseProjectRef &&
-      new URL(supabaseUrl).hostname === `${protectedSupabaseProjectRef}.supabase.co`
+      new URL(supabaseUrl).hostname ===
+        `${protectedSupabaseProjectRef}.supabase.co`
     ) {
       throw new Error("拒绝将源 Supabase 绑定到目标 Pages")
     }
@@ -724,7 +844,7 @@ export function createCloudflareProvider({
           },
         }),
       }),
-      "Cloudflare",
+      "Cloudflare"
     )
   }
 
@@ -775,7 +895,7 @@ export function createCloudflareProvider({
           CLOUDFLARE_ACCOUNT_ID: accountId,
         },
         operation: "部署 Task Roadmap Pages",
-      },
+      }
     )
   }
 
@@ -789,29 +909,38 @@ export function createCloudflareProvider({
         record.name === TARGET_DOMAIN &&
         record.type === "CNAME" &&
         record.content?.replace(/\.$/, "") === expectedTarget &&
-        record.proxied === true,
+        record.proxied === true
     )
     if (records.length > 0 && !recordsMatchTarget) {
-      throw new ProviderError("DOMAIN_CONFLICT", "task.telljax.com 已存在 DNS 记录")
+      throw new ProviderError(
+        "DOMAIN_CONFLICT",
+        "task.telljax.com 已存在 DNS 记录"
+      )
     }
 
     const projects = await request(`/accounts/${accountId}/pages/projects`)
     const owner = projects.find(
       (project) =>
-        project.name !== TARGET_PAGES_PROJECT && project.domains?.includes(TARGET_DOMAIN),
+        project.name !== TARGET_PAGES_PROJECT &&
+        project.domains?.includes(TARGET_DOMAIN)
     )
     if (owner) {
-      throw new ProviderError("DOMAIN_CONFLICT", "task.telljax.com 已绑定其他 Pages 项目")
+      throw new ProviderError(
+        "DOMAIN_CONFLICT",
+        "task.telljax.com 已绑定其他 Pages 项目"
+      )
     }
 
     const domains = await request(
-      `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains`,
+      `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains`
     )
     const existing = domains.find((domain) => domain.name === TARGET_DOMAIN)
-    const domain = existing ?? await request(
-      `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains`,
-      { method: "POST", body: JSON.stringify({ name: TARGET_DOMAIN }) },
-    )
+    const domain =
+      existing ??
+      (await request(
+        `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains`,
+        { method: "POST", body: JSON.stringify({ name: TARGET_DOMAIN }) }
+      ))
     if (records.length === 0) {
       await request(`/zones/${zoneId}/dns_records`, {
         method: "POST",
@@ -829,7 +958,7 @@ export function createCloudflareProvider({
 
   async function getDomain() {
     return request(
-      `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains/${TARGET_DOMAIN}`,
+      `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains/${TARGET_DOMAIN}`
     )
   }
 

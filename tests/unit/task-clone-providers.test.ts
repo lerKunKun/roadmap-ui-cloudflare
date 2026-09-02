@@ -16,14 +16,14 @@ it("pins the official Supabase database root CA", async () => {
   const certificate = new X509Certificate(
     await readFile(
       resolve(process.cwd(), "supabase/certificates/prod-ca-2021.crt"),
-      "utf8",
-    ),
+      "utf8"
+    )
   )
 
   expect(certificate.ca).toBe(true)
   expect(certificate.subject).toContain("CN=Supabase Root 2021 CA")
   expect(certificate.fingerprint256).toBe(
-    "80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA",
+    "80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA"
   )
 })
 
@@ -33,7 +33,7 @@ it("runs npx through Node instead of spawning a Windows command shim", () => {
       platform: "win32",
       execPath: "C:\\nvm4w\\nodejs\\node.exe",
       npmExecPath: "C:\\nvm4w\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
-    }),
+    })
   ).toEqual({
     program: "C:\\nvm4w\\nodejs\\node.exe",
     args: [
@@ -50,7 +50,7 @@ it("runs npm scripts through the npm CLI on Windows", () => {
       platform: "win32",
       execPath: "C:\\nvm4w\\nodejs\\node.exe",
       npmExecPath: "C:\\nvm4w\\nodejs\\node_modules\\npm\\bin\\npm-cli.js",
-    }),
+    })
   ).toEqual({
     program: "C:\\nvm4w\\nodejs\\node.exe",
     args: [
@@ -66,7 +66,7 @@ describe("task clone Supabase provider", () => {
     const events: string[] = []
     const migrationPath = resolve(
       process.cwd(),
-      "supabase/migrations/20260902090000_advertising_sync_export.sql",
+      "supabase/migrations/20260902090000_advertising_sync_export.sql"
     )
     const migration = await readFile(migrationPath, "utf8")
     const expectedSha256 = createHash("sha256").update(migration).digest("hex")
@@ -92,16 +92,10 @@ describe("task clone Supabase provider", () => {
         expectedSha256,
         region: "us-west-2",
         databasePassword: "source-password",
-      }),
+      })
     ).resolves.toEqual({ applied: true, sha256: expectedSha256 })
 
-    expect(events).toEqual([
-      "connect",
-      "BEGIN",
-      migration,
-      "COMMIT",
-      "end",
-    ])
+    expect(events).toEqual(["connect", "BEGIN", migration, "COMMIT", "end"])
   })
 
   it("rejects an altered or different protected-source migration before connecting", async () => {
@@ -112,7 +106,8 @@ describe("task clone Supabase provider", () => {
       protectedProjectRef: "abcdefghijklmnopqrst",
       runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
       fetchImpl: async () => Response.json({}),
-      migrationReadFile: (async () => unsafeMigration) as unknown as typeof readFile,
+      migrationReadFile: (async () =>
+        unsafeMigration) as unknown as typeof readFile,
       pgClientFactory: async () => ({
         connect: async () => {
           connected = true
@@ -123,7 +118,7 @@ describe("task clone Supabase provider", () => {
     })
     const approvedPath = resolve(
       process.cwd(),
-      "supabase/migrations/20260902090000_advertising_sync_export.sql",
+      "supabase/migrations/20260902090000_advertising_sync_export.sql"
     )
 
     await expect(
@@ -135,7 +130,7 @@ describe("task clone Supabase provider", () => {
           .digest("hex"),
         region: "us-west-2",
         databasePassword: "source-password",
-      }),
+      })
     ).rejects.toThrow("源迁移内容不在允许范围内")
 
     await expect(
@@ -145,7 +140,7 @@ describe("task clone Supabase provider", () => {
         expectedSha256: "a".repeat(64),
         region: "us-west-2",
         databasePassword: "source-password",
-      }),
+      })
     ).rejects.toThrow("源迁移文件不在允许范围内")
     expect(connected).toBe(false)
   })
@@ -191,7 +186,11 @@ describe("task clone Supabase provider", () => {
         connect: async () => events.push("connect"),
         query: async (sql: string) => {
           events.push(sql)
-          return { command: "SELECT", fields: [{ name: "one" }], rows: [{ one: 1 }] }
+          return {
+            command: "SELECT",
+            fields: [{ name: "one" }],
+            rows: [{ one: 1 }],
+          }
         },
         end: async () => events.push("end"),
       }),
@@ -205,7 +204,7 @@ describe("task clone Supabase provider", () => {
         sql: "select 1 as one",
         operation: "safe",
         readOnly: true,
-      }),
+      })
     ).resolves.toEqual({
       stdout: JSON.stringify({ rows: [{ one: 1 }] }),
       stderr: "",
@@ -244,7 +243,7 @@ describe("task clone Supabase provider", () => {
         sql: "select 1; commit; select public.consume_suggestion_image_quota('x')",
         operation: "unsafe escape",
         readOnly: true,
-      }),
+      })
     ).rejects.toThrow("拒绝修改源 Supabase 项目")
     expect(connected).toBe(false)
   })
@@ -316,7 +315,7 @@ describe("task clone Supabase provider", () => {
         databasePassword: "hidden",
         sql: "select 1",
         operation: "connect",
-      }),
+      })
     ).rejects.toThrow("connect失败（PostgreSQL ECONNREFUSED）")
     expect(events).toEqual(["connect", "end"])
   })
@@ -329,7 +328,11 @@ describe("task clone Supabase provider", () => {
       pgClientFactory: async () => ({
         connect: async () => {},
         query: async () => [
-          { command: "SELECT", fields: [{ name: "old" }], rows: [{ old: true }] },
+          {
+            command: "SELECT",
+            fields: [{ name: "old" }],
+            rows: [{ old: true }],
+          },
           { command: "SELECT", fields: [{ name: "current" }], rows: [] },
           { command: "COMMIT", fields: [], rows: [] },
         ],
@@ -344,7 +347,7 @@ describe("task clone Supabase provider", () => {
         databasePassword: "hidden",
         sql: "select true as old; select false as current; commit;",
         operation: "empty result",
-      }),
+      })
     ).resolves.toMatchObject({ stdout: JSON.stringify({ rows: [] }) })
   })
 
@@ -386,7 +389,7 @@ describe("task clone Supabase provider", () => {
         databasePassword: "hidden password",
         sql: "begin; select jsonb_build_object('version', 1) as snapshot; commit;",
         operation: "multi statement",
-      }),
+      })
     ).resolves.toEqual({
       stdout: JSON.stringify({ rows: [{ snapshot: { version: 1 } }] }),
       stderr: "",
@@ -419,7 +422,7 @@ describe("task clone Supabase provider", () => {
         databasePassword: "hidden",
         sql: "delete from public.projects",
         operation: "unsafe",
-      }),
+      })
     ).rejects.toThrow("拒绝修改源 Supabase 项目")
 
     await expect(
@@ -430,7 +433,7 @@ describe("task clone Supabase provider", () => {
         sql: "select 1",
         operation: "safe",
         readOnly: true,
-      }),
+      })
     ).resolves.toBeDefined()
   })
 
@@ -451,12 +454,64 @@ describe("task clone Supabase provider", () => {
       fetchImpl: async () => new Response(),
     })
 
-    await expect(
-      provider.getApiKeys("abcdefghijklmnopqrst"),
-    ).resolves.toEqual({
+    await expect(provider.getApiKeys("abcdefghijklmnopqrst")).resolves.toEqual({
       publishableKey: `sb_publishable_${"a".repeat(32)}`,
       secretKey: `sb_secret_${"b".repeat(32)}`,
     })
+  })
+
+  it("sets the five target sync Edge secrets without sending them to another provider", async () => {
+    let secretFile = ""
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async (_program: string, args: string[]) => {
+        const envIndex = args.indexOf("--env-file")
+        expect(envIndex).toBeGreaterThan(-1)
+        secretFile = await readFile(args[envIndex + 1], "utf8")
+        return { stdout: "", stderr: "", exitCode: 0 }
+      },
+      fetchImpl: async () => Response.json({}),
+    })
+
+    await provider.setAdvertisingSyncEdgeSecrets({
+      targetProjectRef: "bcdefghijklmnopqrstu",
+      cronSecret: "a".repeat(64),
+      sourceUrl: "https://abcdefghijklmnopqrst.supabase.co",
+      sourceSecretKey: `sb_secret_${"s".repeat(32)}`,
+      sourceProjectRef: "abcdefghijklmnopqrst",
+    })
+
+    expect(secretFile).toContain("ADVERTISING_SYNC_CRON_SECRET=")
+    expect(secretFile).toContain("SOURCE_SUPABASE_URL=")
+    expect(secretFile).toContain("SOURCE_SUPABASE_SECRET_KEY=")
+    expect(secretFile).toContain("SOURCE_SUPABASE_PROJECT_REF=")
+    expect(secretFile).toContain("TARGET_SUPABASE_PROJECT_REF=")
+    expect(secretFile).not.toContain("CLOUDFLARE")
+    expect(secretFile).not.toContain("ADMIN_PASSWORD")
+  })
+
+  it("deploys only an allow-listed target Edge Function", async () => {
+    const invocations: string[][] = []
+    const provider = createSupabaseProvider({
+      accessToken: "management-token",
+      protectedProjectRef: "abcdefghijklmnopqrst",
+      runCommand: async (_program: string, args: string[]) => {
+        invocations.push(args)
+        return { stdout: "", stderr: "", exitCode: 0 }
+      },
+      fetchImpl: async () => Response.json({}),
+    })
+
+    await provider.deployEdgeFunction(
+      "bcdefghijklmnopqrstu",
+      "sync-advertising"
+    )
+    expect(invocations[0]).toContain("sync-advertising")
+    expect(invocations[0]).toContain("--no-verify-jwt")
+    await expect(
+      provider.deployEdgeFunction("bcdefghijklmnopqrstu", "arbitrary-function")
+    ).rejects.toThrow("Edge Function 不在允许列表")
   })
 
   it("disables signup, resets one administrator password, and verifies login", async () => {
@@ -547,7 +602,8 @@ describe("task clone Supabase provider", () => {
       runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
       fetchImpl: async (input: RequestInfo | URL, init?: RequestInit) => {
         const request = new Request(input, init)
-        if (request.method === "GET") return Response.json({ disable_signup: false })
+        if (request.method === "GET")
+          return Response.json({ disable_signup: false })
         return Response.json({})
       },
     })
@@ -559,7 +615,7 @@ describe("task clone Supabase provider", () => {
         secretKey: `sb_secret_${"b".repeat(32)}`,
         adminEmail: "roadmap-admin@internal.invalid",
         adminPassword: "Strong-admin-password-2026!LongValue",
-      }),
+      })
     ).rejects.toThrow("Auth 配置回读不一致")
   })
 
@@ -578,7 +634,7 @@ describe("task clone Supabase provider", () => {
         secretKey: `sb_secret_${"b".repeat(32)}`,
         adminEmail: "roadmap-admin@internal.invalid",
         adminPassword: "Strong-admin-password-2026!LongValue",
-      }),
+      })
     ).rejects.toThrow("Auth URL 与目标项目不匹配")
   })
 })
@@ -594,7 +650,7 @@ describe("task clone Cloudflare provider", () => {
     })
 
     await expect(provider.ensurePagesProject()).rejects.toThrow(
-      "拒绝修改源 Cloudflare Pages 项目",
+      "拒绝修改源 Cloudflare Pages 项目"
     )
   })
 
@@ -614,7 +670,7 @@ describe("task clone Cloudflare provider", () => {
         supabaseUrl: "https://abcdefghijklmnopqrst.supabase.co",
         publishableKey: `sb_publishable_${"c".repeat(32)}`,
         secretKey: `sb_secret_${"d".repeat(32)}`,
-      }),
+      })
     ).rejects.toThrow("拒绝将源 Supabase 绑定到目标 Pages")
   })
 
@@ -632,11 +688,10 @@ describe("task clone Cloudflare provider", () => {
     await expect(
       provider.deployPages({
         buildEnv: {
-          NEXT_PUBLIC_SUPABASE_URL:
-            "https://abcdefghijklmnopqrst.supabase.co",
+          NEXT_PUBLIC_SUPABASE_URL: "https://abcdefghijklmnopqrst.supabase.co",
         },
         commitHash: "f".repeat(40),
-      }),
+      })
     ).rejects.toThrow("拒绝使用源 Supabase 构建目标 Pages")
   })
 
@@ -651,7 +706,10 @@ describe("task clone Cloudflare provider", () => {
         return Response.json({ success: false, errors: [] }, { status: 404 })
       }
       if (request.method === "POST") projectExists = true
-      return Response.json({ success: true, result: { name: "task-roadmap-ui" } })
+      return Response.json({
+        success: true,
+        result: { name: "task-roadmap-ui" },
+      })
     }
     const provider = createCloudflareProvider({
       accountId: "a".repeat(32),
@@ -814,9 +872,7 @@ describe("task clone Cloudflare provider", () => {
       if (request.url.endsWith("/pages/projects")) {
         return Response.json({
           success: true,
-          result: [
-            { name: "task-roadmap-ui", domains: ["task.telljax.com"] },
-          ],
+          result: [{ name: "task-roadmap-ui", domains: ["task.telljax.com"] }],
         })
       }
       return Response.json({

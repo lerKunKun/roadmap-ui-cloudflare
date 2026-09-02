@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   assertTaskIdentity,
+  ensureAdvertisingSyncCronSecret,
   generateTargetSecrets,
   parseTaskInputs,
   validateTaskIdentity,
@@ -33,6 +34,7 @@ const targetInputs = {
   ADMIN_EMAIL: "roadmap-admin@internal.invalid",
   ADMIN_PASSWORD: "Task-admin-password-2026!LongAndSafe",
   VOTE_IP_SALT: "d".repeat(64),
+  ADVERTISING_SYNC_CRON_SECRET: "e".repeat(64),
 }
 
 describe("task clone configuration", () => {
@@ -63,7 +65,7 @@ describe("task clone configuration", () => {
         ...targetInputs,
         SUPABASE_PROJECT_REF: sourceInputs.SUPABASE_PROJECT_REF,
         SUPABASE_URL: `https://${sourceInputs.SUPABASE_PROJECT_REF}.supabase.co`,
-      }),
+      })
     ).toThrow("目标部署配置无效")
   })
 
@@ -77,14 +79,14 @@ describe("task clone configuration", () => {
       validateTaskIdentity(sourceInputs, {
         ...targetInputs,
         [field]: sourceInputs[field as keyof typeof sourceInputs],
-      }),
+      })
     ).toContain(`${field}：必须与源实例不同`)
   })
 
   it("generates strong target-only passwords and a hexadecimal salt", () => {
     let fill = 1
     const secrets = generateTargetSecrets((size: number) =>
-      Buffer.alloc(size, fill++),
+      Buffer.alloc(size, fill++)
     )
 
     for (const password of [secrets.databasePassword, secrets.adminPassword]) {
@@ -96,6 +98,8 @@ describe("task clone configuration", () => {
     }
     expect(secrets.databasePassword).not.toBe(secrets.adminPassword)
     expect(secrets.voteIpSalt).toMatch(/^[a-f0-9]{64}$/)
+    expect(secrets.advertisingSyncCronSecret).toMatch(/^[a-f0-9]{64}$/)
+    expect(secrets.advertisingSyncCronSecret).not.toBe(secrets.voteIpSalt)
   })
 
   it("writes quoted values atomically and parses symbols literally", async () => {
@@ -117,18 +121,48 @@ describe("task clone configuration", () => {
     await writeFile(
       path,
       'SUPABASE_PROJECT_REF="anotherprojectrefxxx"\n',
-      "utf8",
+      "utf8"
     )
 
     await expect(
       writeTargetInputsAtomic(path, targetInputs, {
         expectedProjectRef: targetInputs.SUPABASE_PROJECT_REF,
-      }),
+      })
     ).rejects.toThrow("目标配置属于其他 Supabase 项目")
 
     expect(await readFile(path, "utf8")).toBe(
-      'SUPABASE_PROJECT_REF="anotherprojectrefxxx"\n',
+      'SUPABASE_PROJECT_REF="anotherprojectrefxxx"\n'
     )
+  })
+
+  it("atomically upgrades the matching legacy target file with a sync secret", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "task-roadmap-config-"))
+    const path = join(directory, ".env.task.deploy.local")
+    const legacy = Object.fromEntries(
+      Object.entries(targetInputs).filter(
+        ([field]) => field !== "ADVERTISING_SYNC_CRON_SECRET"
+      )
+    )
+    await writeFile(
+      path,
+      `${Object.entries(legacy)
+        .map(([field, value]) => `${field}=${JSON.stringify(value)}`)
+        .join("\n")}\n`,
+      "utf8"
+    )
+
+    await expect(
+      ensureAdvertisingSyncCronSecret(
+        path,
+        targetInputs.SUPABASE_PROJECT_REF,
+        () => Buffer.alloc(32, 7)
+      )
+    ).resolves.toBe("07".repeat(32))
+
+    expect(parseTaskInputs(await readFile(path, "utf8"))).toEqual({
+      ...legacy,
+      ADVERTISING_SYNC_CRON_SECRET: "07".repeat(32),
+    })
   })
 
   it("redacts child output when a command fails", async () => {
@@ -137,9 +171,12 @@ describe("task clone configuration", () => {
     await expect(
       runCaptured(
         process.execPath,
-        ["-e", `process.stderr.write(${JSON.stringify(leaked)}); process.exit(7)`],
-        { operation: "测试安全命令" },
-      ),
+        [
+          "-e",
+          `process.stderr.write(${JSON.stringify(leaked)}); process.exit(7)`,
+        ],
+        { operation: "测试安全命令" }
+      )
     ).rejects.toMatchObject({
       message: "测试安全命令失败（退出码 7）",
     })
@@ -147,8 +184,11 @@ describe("task clone configuration", () => {
     try {
       await runCaptured(
         process.execPath,
-        ["-e", `process.stderr.write(${JSON.stringify(leaked)}); process.exit(7)`],
-        { operation: "测试安全命令" },
+        [
+          "-e",
+          `process.stderr.write(${JSON.stringify(leaked)}); process.exit(7)`,
+        ],
+        { operation: "测试安全命令" }
       )
     } catch (error) {
       expect(String(error)).not.toContain(leaked)
