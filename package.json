@@ -29,7 +29,7 @@
     "sync:advertising:disable": "node scripts/task-clone/advertising-sync.mjs disable",
     "supabase:test:advertising-target": "node scripts/task-clone/advertising-sync.mjs test-target",
     "admin-password": "node scripts/generate-admin-password.mjs",
-    "supabase:test": "supabase test db"
+    "supabase:test": "supabase test db supabase/tests/database"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
