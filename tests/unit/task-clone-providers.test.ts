@@ -112,7 +112,7 @@ describe("task clone Supabase provider", () => {
       protectedProjectRef: "abcdefghijklmnopqrst",
       runCommand: async () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
       fetchImpl: async () => Response.json({}),
-      migrationReadFile: async () => unsafeMigration,
+      migrationReadFile: (async () => unsafeMigration) as unknown as typeof readFile,
       pgClientFactory: async () => ({
         connect: async () => {
           connected = true
