@@ -230,6 +230,14 @@ describe("advertising acceptance SQL safety", () => {
     expect(sql).toContain(sentinel.projectId)
     expect(sql).toContain(sentinel.slug)
     expect(sql).not.toContain("where slug = 'advertising-system'")
+
+    const withoutLocalMutation = buildCleanupAcceptanceSql({
+      sentinel,
+      localAdvertisingMutation: null,
+    })
+    expect(withoutLocalMutation).not.toContain(
+      "00000000-0000-4000-8000-000000000000"
+    )
   })
 
   it("rejects arbitrary fixture values before creating SQL", () => {
