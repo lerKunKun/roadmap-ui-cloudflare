@@ -57,9 +57,16 @@ const imageBytes = new TextEncoder().encode("image")
 
 describe("advertising image preparation", () => {
   it("hashes and uploads a missing target object without overwrite", async () => {
-    const uploads: Array<{ path: string; bytes: Uint8Array; contentType: string }> = []
+    const uploads: Array<{
+      path: string
+      bytes: Uint8Array
+      contentType: string
+    }> = []
     const result = await prepareAdvertisingImages(snapshotWithImages(), {
-      downloadSource: async () => ({ bytes: imageBytes, contentType: "image/png" }),
+      downloadSource: async () => ({
+        bytes: imageBytes,
+        contentType: "image/png",
+      }),
       downloadTarget: async () => null,
       uploadTarget: async (path, bytes, contentType) => {
         uploads.push({ path, bytes, contentType })
@@ -71,7 +78,7 @@ describe("advertising image preparation", () => {
       snapshotWithImages().images[0].storagePath,
     ])
     expect(result.snapshot.images[0].sha256).toBe(
-      "6105d6cc76af400325e94d588ce511be5bfdbb73b437dc51eca43917d7a43e3d",
+      "6105d6cc76af400325e94d588ce511be5bfdbb73b437dc51eca43917d7a43e3d"
     )
     expect(uploads).toEqual([
       {
@@ -85,8 +92,14 @@ describe("advertising image preparation", () => {
   it("reuses an existing target object only when bytes and MIME match", async () => {
     let uploads = 0
     const result = await prepareAdvertisingImages(snapshotWithImages(), {
-      downloadSource: async () => ({ bytes: imageBytes, contentType: "image/png" }),
-      downloadTarget: async () => ({ bytes: imageBytes, contentType: "image/png" }),
+      downloadSource: async () => ({
+        bytes: imageBytes,
+        contentType: "image/png",
+      }),
+      downloadTarget: async () => ({
+        bytes: imageBytes,
+        contentType: "image/png",
+      }),
       uploadTarget: async () => {
         uploads += 1
       },
@@ -100,20 +113,26 @@ describe("advertising image preparation", () => {
   it("fails closed when an existing target path has different content", async () => {
     await expect(
       prepareAdvertisingImages(snapshotWithImages(), {
-        downloadSource: async () => ({ bytes: imageBytes, contentType: "image/png" }),
+        downloadSource: async () => ({
+          bytes: imageBytes,
+          contentType: "image/png",
+        }),
         downloadTarget: async () => ({
           bytes: new TextEncoder().encode("other"),
           contentType: "image/png",
         }),
         uploadTarget: async () => {},
         removeTarget: async () => {},
-      }),
+      })
     ).rejects.toMatchObject({ code: "IMAGE_CONFLICT" })
   })
 
   it.each([
     ["wrong MIME", { bytes: imageBytes, contentType: "image/jpeg" }],
-    ["wrong byte length", { bytes: imageBytes.slice(0, 4), contentType: "image/png" }],
+    [
+      "wrong byte length",
+      { bytes: imageBytes.slice(0, 4), contentType: "image/png" },
+    ],
   ])("rejects source metadata mismatch: %s", async (_name, source) => {
     await expect(
       prepareAdvertisingImages(snapshotWithImages(), {
@@ -121,7 +140,7 @@ describe("advertising image preparation", () => {
         downloadTarget: async () => null,
         uploadTarget: async () => {},
         removeTarget: async () => {},
-      }),
+      })
     ).rejects.toMatchObject({ code: "IMAGE_UNAVAILABLE" })
   })
 
@@ -132,19 +151,25 @@ describe("advertising image preparation", () => {
 
     await expect(
       prepareAdvertisingImages(snapshot, {
-        downloadSource: async () => ({ bytes: imageBytes, contentType: "image/png" }),
+        downloadSource: async () => ({
+          bytes: imageBytes,
+          contentType: "image/png",
+        }),
         downloadTarget: async () => null,
         uploadTarget: async () => {
           uploadCount += 1
-          if (uploadCount === 3) throw new Error("provider body must not escape")
+          if (uploadCount === 3)
+            throw new Error("provider body must not escape")
         },
         removeTarget: async (paths) => {
           removed.push(paths)
         },
-      }),
+      })
     ).rejects.toMatchObject({ code: "IMAGE_UNAVAILABLE" })
 
-    expect(removed).toEqual([[...snapshot.images.map((image) => image.storagePath)].reverse()])
+    expect(removed).toEqual([
+      [...snapshot.images.map((image) => image.storagePath)].reverse(),
+    ])
   })
 
   it("runs no more than three image transfers concurrently", async () => {
@@ -171,7 +196,10 @@ describe("advertising image preparation", () => {
 describe("advertising Storage REST adapters", () => {
   it("encodes path segments and uses private server credentials with no upsert", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = []
-    const fetchImpl = async (url: string | URL | Request, init: RequestInit = {}) => {
+    const fetchImpl = async (
+      url: string | URL | Request,
+      init: RequestInit = {}
+    ) => {
       requests.push({ url: String(url), init })
       if (init.method === "POST") return new Response(null, { status: 200 })
       return new Response(imageBytes, {
@@ -188,15 +216,19 @@ describe("advertising Storage REST adapters", () => {
     })
 
     await deps.downloadSource("suggestions/folder name/image.png")
-    await deps.uploadTarget("suggestions/folder name/image.png", imageBytes, "image/png")
+    await deps.uploadTarget(
+      "suggestions/folder name/image.png",
+      imageBytes,
+      "image/png"
+    )
 
     expect(requests[0].url).toContain("suggestions/folder%20name/image.png")
-    expect(new Headers(requests[0].init.headers).get("authorization")).toBe(
-      "Bearer sb_secret_source",
-    )
+    expect(
+      new Headers(requests[0].init.headers).get("authorization")
+    ).toBeNull()
     expect(new Headers(requests[1].init.headers).get("x-upsert")).toBe("false")
-    expect(new Headers(requests[1].init.headers).get("authorization")).toBe(
-      "Bearer sb_secret_target",
-    )
+    expect(
+      new Headers(requests[1].init.headers).get("authorization")
+    ).toBeNull()
   })
 })

@@ -34,7 +34,7 @@ function runtimeConfigError(): Error & { code: string } {
 }
 
 export function readAdvertisingSyncRuntimeConfig(
-  getEnv: GetEnv = getRuntimeEnv,
+  getEnv: GetEnv = getRuntimeEnv
 ): AdvertisingSyncRuntimeConfig {
   const required = {
     cronSecret: getEnv("ADVERTISING_SYNC_CRON_SECRET"),
@@ -66,18 +66,22 @@ export function readAdvertisingSyncRuntimeConfig(
 }
 
 function serverHeaders(key: string): Headers {
-  return new Headers({
+  const headers = new Headers({
     apikey: key,
-    authorization: `Bearer ${key}`,
     "content-type": "application/json",
   })
+  if (!key.startsWith("sb_")) {
+    headers.set("authorization", `Bearer ${key}`)
+  }
+  return headers
 }
 
 async function readJsonResponse(
   response: Response,
-  code: string,
+  code: string
 ): Promise<unknown> {
-  if (!response.ok) throw Object.assign(new Error("provider request failed"), { code })
+  if (!response.ok)
+    throw Object.assign(new Error("provider request failed"), { code })
   try {
     return await response.json()
   } catch {
@@ -87,7 +91,7 @@ async function readJsonResponse(
 
 function createRuntimeDependencies(
   config: AdvertisingSyncRuntimeConfig,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = fetch
 ): AdvertisingSyncDependencies {
   const storage = createAdvertisingStorageDependencies({
     sourceUrl: config.sourceUrl,
@@ -102,7 +106,7 @@ function createRuntimeDependencies(
     key: string,
     functionName: string,
     body: Record<string, unknown>,
-    code: string,
+    code: string
   ) {
     let response: Response
     try {
@@ -112,7 +116,7 @@ function createRuntimeDependencies(
           method: "POST",
           headers: serverHeaders(key),
           body: JSON.stringify(body),
-        },
+        }
       )
     } catch {
       throw Object.assign(new Error("provider unavailable"), { code })
@@ -123,21 +127,21 @@ function createRuntimeDependencies(
   async function targetRpc(
     functionName: string,
     body: Record<string, unknown>,
-    code = "TARGET_APPLY_FAILED",
+    code = "TARGET_APPLY_FAILED"
   ) {
     return rpc(
       config.targetUrl,
       config.targetServiceRoleKey,
       functionName,
       body,
-      code,
+      code
     )
   }
 
   async function listCleanupPaths(): Promise<string[]> {
     const response = await fetchImpl(
       `${config.targetUrl}/rest/v1/roadmap_advertising_sync_object_cleanup?select=storage_path&order=storage_path.asc`,
-      { headers: serverHeaders(config.targetServiceRoleKey) },
+      { headers: serverHeaders(config.targetServiceRoleKey) }
     )
     const rows = await readJsonResponse(response, "TARGET_APPLY_FAILED")
     return Array.isArray(rows)
@@ -145,7 +149,7 @@ function createRuntimeDependencies(
           .map((row) =>
             row && typeof row === "object" && "storage_path" in row
               ? String(row.storage_path)
-              : "",
+              : ""
           )
           .filter(Boolean)
       : []
@@ -157,8 +161,8 @@ function createRuntimeDependencies(
         await targetRpc(
           "claim_advertising_roadmap_sync",
           { run_id: runId },
-          "TARGET_APPLY_FAILED",
-        ),
+          "TARGET_APPLY_FAILED"
+        )
       )
     },
     fetchSnapshot() {
@@ -167,7 +171,7 @@ function createRuntimeDependencies(
         config.sourceSecretKey,
         "export_advertising_roadmap_snapshot",
         {},
-        "SOURCE_UNAVAILABLE",
+        "SOURCE_UNAVAILABLE"
       )
     },
     prepareImages(snapshot) {
@@ -191,7 +195,7 @@ function createRuntimeDependencies(
     async confirmApply(runId, digest) {
       const response = await fetchImpl(
         `${config.targetUrl}/rest/v1/roadmap_advertising_sync_state?select=active_run_id,last_snapshot_digest&singleton=eq.true`,
-        { headers: serverHeaders(config.targetServiceRoleKey) },
+        { headers: serverHeaders(config.targetServiceRoleKey) }
       )
       const value = await readJsonResponse(response, "TARGET_APPLY_FAILED")
       const row = Array.isArray(value) ? value[0] : null
@@ -249,7 +253,9 @@ function responseStatus(code: string): number {
   if (code === "UNAUTHORIZED") return 401
   if (code === "SYNC_BUSY") return 409
   if (["SNAPSHOT_INVALID", "SOURCE_IDENTITY_INVALID"].includes(code)) return 422
-  if (["SOURCE_UNAVAILABLE", "IMAGE_UNAVAILABLE", "IMAGE_CONFLICT"].includes(code)) {
+  if (
+    ["SOURCE_UNAVAILABLE", "IMAGE_UNAVAILABLE", "IMAGE_CONFLICT"].includes(code)
+  ) {
     return 502
   }
   return 500
@@ -259,7 +265,10 @@ export function createAdvertisingSyncHandler(options: HandlerOptions = {}) {
   const getEnv = options.getEnv ?? getRuntimeEnv
   return async (request: Request): Promise<Response> => {
     if (request.method !== "POST") {
-      return Response.json({ ok: false, message: "仅支持 POST 请求" }, { status: 405 })
+      return Response.json(
+        { ok: false, message: "仅支持 POST 请求" },
+        { status: 405 }
+      )
     }
 
     const providedCronSecret = request.headers.get("x-roadmap-sync-secret")
@@ -272,10 +281,7 @@ export function createAdvertisingSyncHandler(options: HandlerOptions = {}) {
       const safe = safeSyncError(runtimeConfigError())
       return Response.json({ ok: false, ...safe }, { status: 500 })
     }
-    if (!(await hasValidSyncSecret(
-      providedCronSecret,
-      expectedCronSecret,
-    ))) {
+    if (!(await hasValidSyncSecret(providedCronSecret, expectedCronSecret))) {
       const safe = safeSyncError({ code: "UNAUTHORIZED" })
       return Response.json({ ok: false, ...safe }, { status: 401 })
     }
@@ -292,15 +298,21 @@ export function createAdvertisingSyncHandler(options: HandlerOptions = {}) {
       const result = options.run
         ? await options.run()
         : await runAdvertisingSync(
-            createRuntimeDependencies(config, options.fetchImpl),
+            createRuntimeDependencies(config, options.fetchImpl)
           )
-      const digest = typeof result.digest === "string" ? result.digest.slice(0, 12) : undefined
-      return Response.json({ ...result, ...(digest ? { digest } : {}) }, { status: 200 })
+      const digest =
+        typeof result.digest === "string"
+          ? result.digest.slice(0, 12)
+          : undefined
+      return Response.json(
+        { ...result, ...(digest ? { digest } : {}) },
+        { status: 200 }
+      )
     } catch (error) {
       const safe = safeSyncError(error)
       return Response.json(
         { ok: false, ...safe },
-        { status: responseStatus(safe.code) },
+        { status: responseStatus(safe.code) }
       )
     }
   }
@@ -309,7 +321,9 @@ export function createAdvertisingSyncHandler(options: HandlerOptions = {}) {
 const handler = createAdvertisingSyncHandler()
 
 type DenoServeGlobal = typeof globalThis & {
-  Deno?: { serve?: (handler: (request: Request) => Promise<Response>) => unknown }
+  Deno?: {
+    serve?: (handler: (request: Request) => Promise<Response>) => unknown
+  }
 }
 
 const runtimeGlobal = globalThis as DenoServeGlobal

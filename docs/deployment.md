@@ -95,14 +95,14 @@ npx supabase functions deploy vote --use-api --import-map supabase/functions/den
 
 建议项目名：`roadmap-ui`。构建配置：
 
-| 配置项 | 值 |
-| --- | --- |
-| Framework preset | Next.js (Static HTML Export) |
-| Production branch | `master`（合并本功能分支后） |
-| Root directory | 仓库根目录 |
-| Build command | `npm run build` |
-| Build output directory | `out` |
-| Node.js | 22 |
+| 配置项                 | 值                           |
+| ---------------------- | ---------------------------- |
+| Framework preset       | Next.js (Static HTML Export) |
+| Production branch      | `master`（合并本功能分支后） |
+| Root directory         | 仓库根目录                   |
+| Build command          | `npm run build`              |
+| Build output directory | `out`                        |
+| Node.js                | 22                           |
 
 在 Settings → Environment variables 同时配置 Production 和 Preview：
 
@@ -117,11 +117,11 @@ NODE_VERSION=22
 
 Pages Function `/media/*` 还要求在 Production 和 Preview 两个环境分别配置以下运行时值：
 
-| 变量 | Cloudflare 类型 | 用途 |
-| --- | --- | --- |
-| `SUPABASE_URL` | Text | 服务端查询图片公开元数据与读取 Storage 的项目 URL |
-| `SUPABASE_PUBLISHABLE_KEY` | Text | 服务端查询 `roadmap_item_images_public` |
-| `SUPABASE_SECRET_KEY` | Secret（加密） | 服务端读取私有 `roadmap-images` 对象 |
+| 变量                       | Cloudflare 类型 | 用途                                              |
+| -------------------------- | --------------- | ------------------------------------------------- |
+| `SUPABASE_URL`             | Text            | 服务端查询图片公开元数据与读取 Storage 的项目 URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Text            | 服务端查询 `roadmap_item_images_public`           |
+| `SUPABASE_SECRET_KEY`      | Secret（加密）  | 服务端读取私有 `roadmap-images` 对象              |
 
 `SUPABASE_SECRET_KEY` 仅允许存在于 Pages Function 的服务端运行时，必须使用 Cloudflare 加密 Secret；绝不能命名为 `NEXT_PUBLIC_SUPABASE_SECRET_KEY`、写入 `NEXT_PUBLIC_*`、提交到 Git、出现在构建日志或浏览器包中。不要在文档、命令历史或聊天中粘贴实际值。
 
@@ -149,16 +149,16 @@ roadmap-ui.pages.dev
 
 建议子域名解析：
 
-| 类型 | 名称 | 目标 |
-| --- | --- | --- |
+| 类型  | 名称      | 目标                   |
+| ----- | --------- | ---------------------- |
 | CNAME | `roadmap` | `roadmap-ui.pages.dev` |
 
 当前生产域名使用同一个 Pages 项目，DNS 配置如下：
 
-| 用途 | 类型 | 名称 | 目标 | 代理状态 |
-| --- | --- | --- | --- | --- |
-| 用户端 | CNAME | `telljax.com` | `roadmap-ui.pages.dev` | 已代理 |
-| 管理端 | CNAME | `admin.telljax.com` | `roadmap-ui.pages.dev` | 已代理 |
+| 用途   | 类型  | 名称                | 目标                   | 代理状态 |
+| ------ | ----- | ------------------- | ---------------------- | -------- |
+| 用户端 | CNAME | `telljax.com`       | `roadmap-ui.pages.dev` | 已代理   |
+| 管理端 | CNAME | `admin.telljax.com` | `roadmap-ui.pages.dev` | 已代理   |
 
 - 如果域名的 DNS 已托管在同一个 Cloudflare 账号，确认 Custom domain 后 Cloudflare 会自动创建记录，无需再手工添加。
 - 如果 DNS 在其他服务商，添加上表 CNAME；目标必须替换为 Pages 实际分配的 `*.pages.dev` 地址。
@@ -242,14 +242,14 @@ Supabase Logs 中可检查函数状态；不要记录或输出原始 IP、密码
 
 `Task Roadmap` 与当前 `telljax.com` 使用同一份 `master` 代码，但运行资源完全隔离：
 
-| 项目 | 地址或名称 |
-| --- | --- |
-| 用户端 | `https://task.telljax.com/` |
-| 管理端 | `https://task.telljax.com/admin/` |
-| Cloudflare Pages | `task-roadmap-ui` |
-| Supabase | `task-roadmap` |
+| 项目             | 地址或名称                        |
+| ---------------- | --------------------------------- |
+| 用户端           | `https://task.telljax.com/`       |
+| 管理端           | `https://task.telljax.com/admin/` |
+| Cloudflare Pages | `task-roadmap-ui`                 |
+| Supabase         | `task-roadmap`                    |
 
-目标实例拥有独立数据库、Auth 用户、私有 `roadmap-images` Bucket、Edge Functions、数据库密码、管理员密码和 `VOTE_IP_SALT`。两个实例上线后不进行实时或定时同步。
+目标实例拥有独立数据库、Auth 用户、私有 `roadmap-images` Bucket、Edge Functions、数据库密码、管理员密码和 `VOTE_IP_SALT`。除下文明确列出的“广告系统”单向严格镜像外，两个实例不共享运行数据。
 
 ### 6.1 本机配置
 
@@ -304,8 +304,8 @@ https://task.telljax.com,https://task-roadmap-ui.pages.dev
 
 若必须人工核对，最终逻辑目标应是：
 
-| 类型 | 名称 | 目标 | 代理 |
-| --- | --- | --- | --- |
+| 类型  | 名称   | 目标                        | 代理   |
+| ----- | ------ | --------------------------- | ------ |
 | CNAME | `task` | `task-roadmap-ui.pages.dev` | 已代理 |
 
 ### 6.5 回滚与恢复
@@ -313,3 +313,30 @@ https://task.telljax.com,https://task-roadmap-ui.pages.dev
 在稳定 `pages.dev` 冒烟通过前不绑定 `task.telljax.com`。若目标 Pages 或 Edge Function 异常，只回滚 `task-roadmap-ui` 的部署；若一次性导入失败，自动化会清理本次目标对象并恢复未开放的目标数据，不操作源项目。
 
 域名开放后发现问题时，先从 `task-roadmap-ui` 移除或暂停 `task.telljax.com`，保留目标 Supabase 供排查。不得删除、重置或迁移源 `telljax.com` 的数据库、Pages 项目或管理员。目标管理员密码仅保存在本机 `.env.task.deploy.local`，最终交付时只输出一次。
+
+### 6.6 广告系统单向自动同步
+
+自动同步固定为 `telljax.com` 对应 Supabase → `task.telljax.com` 对应 Supabase，且仅处理 slug 为 `advertising-system` 的一个项目。Task 的其他项目、条目、时间轴、投票和图片不会被同步触碰；没有反向同步。Task 侧对“广告系统”的本地新增、编辑和投票会在下一次成功同步时被源快照严格覆盖。
+
+目标 Supabase 在每小时第 17 分钟运行一次，Cron 表达式为 `17 * * * *`，正常可见延迟不超过约一小时。首次安装保持停用，必须完成两轮可逆隔离验收后才能启用：
+
+```powershell
+npm run sync:advertising:install
+npm run sync:advertising:trigger
+npm run sync:advertising:acceptance
+npm run sync:advertising:status
+npm run sync:advertising:enable
+```
+
+日常检查和紧急停用：
+
+```powershell
+npm run sync:advertising:status
+npm run sync:advertising:disable
+```
+
+状态中的 `lastSuccessAt`、摘要前缀和数量表示最近一次成功镜像；`busy=true` 表示已有租约中的任务；`lastErrorCode` 非空表示最近一次失败；`cleanupCount` 必须为 0。存在对象清理队列时先保持 Cron 停用，核对 Storage 对象和函数日志，再手动触发一次让清理队列重试。函数采用失败关闭：源快照、图片、身份、租约或目标事务任一环节不通过，都不会报告成功或启用 Cron。
+
+轮换源 Secret Key 时，先在目标 Edge Secrets 更新 `SOURCE_SUPABASE_SECRET_KEY` 并手动触发验证，再撤销旧 Key。轮换专用 Cron Secret 时，先同时更新目标 Edge Secret 和 Vault 中的 `advertising_sync_cron_secret`，手动触发并验收后再恢复 Cron。任何密钥都不能写入仓库、SQL 明文、命令输出或验收回执。
+
+回滚时先执行 `npm run sync:advertising:disable`，确认 Cron inactive，再回滚 `sync-advertising` 函数或相关 RPC；不要删除最后一次成功写入的 Task 广告数据。源项目的导出 RPC 始终只读且仅 `service_role` 可调用。

@@ -19,7 +19,7 @@ export type AdvertisingStorageDependencies = {
   uploadTarget(
     path: string,
     bytes: Uint8Array,
-    contentType: string,
+    contentType: string
   ): Promise<void>
   removeTarget(paths: string[]): Promise<void>
 }
@@ -34,7 +34,7 @@ function safeStorageError(error: unknown): Error & { code: string } {
     typeof error === "object" &&
     "code" in error &&
     ["IMAGE_CONFLICT", "IMAGE_UNAVAILABLE", "IMAGE_CLEANUP_FAILED"].includes(
-      String(error.code),
+      String(error.code)
     )
   ) {
     return error as Error & { code: string }
@@ -46,7 +46,7 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)
   const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", copy.buffer),
+    await crypto.subtle.digest("SHA-256", copy.buffer)
   )
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("")
 }
@@ -86,15 +86,16 @@ async function readBoundedBody(response: Response): Promise<Uint8Array> {
 function objectUrl(baseUrl: string, path: string): string {
   return new URL(
     `/storage/v1/object/${BUCKET}/${encodeStoragePath(path)}`,
-    baseUrl,
+    baseUrl
   ).toString()
 }
 
 function serverHeaders(secretKey: string): Headers {
-  return new Headers({
-    apikey: secretKey,
-    authorization: `Bearer ${secretKey}`,
-  })
+  const headers = new Headers({ apikey: secretKey })
+  if (!secretKey.startsWith("sb_")) {
+    headers.set("authorization", `Bearer ${secretKey}`)
+  }
+  return headers
 }
 
 export function createAdvertisingStorageDependencies({
@@ -114,7 +115,7 @@ export function createAdvertisingStorageDependencies({
     baseUrl: string,
     secretKey: string,
     path: string,
-    allowMissing: boolean,
+    allowMissing: boolean
   ): Promise<AdvertisingStorageObject | null> {
     let response: Response
     try {
@@ -176,7 +177,7 @@ export function createAdvertisingStorageDependencies({
             method: "DELETE",
             headers,
             body: JSON.stringify({ prefixes: paths }),
-          },
+          }
         )
       } catch {
         throw storageError("IMAGE_CLEANUP_FAILED", "目标图片补偿清理失败")
@@ -190,7 +191,7 @@ export function createAdvertisingStorageDependencies({
 
 export async function compensateUploadedImages(
   paths: string[],
-  dependencies: Pick<AdvertisingStorageDependencies, "removeTarget">,
+  dependencies: Pick<AdvertisingStorageDependencies, "removeTarget">
 ): Promise<void> {
   if (paths.length === 0) return
   try {
@@ -202,7 +203,7 @@ export async function compensateUploadedImages(
 
 export async function prepareAdvertisingImages(
   input: unknown,
-  dependencies: AdvertisingStorageDependencies,
+  dependencies: AdvertisingStorageDependencies
 ): Promise<{
   snapshot: HydratedAdvertisingSnapshot
   uploadedPaths: string[]
@@ -241,7 +242,7 @@ export async function prepareAdvertisingImages(
       await dependencies.uploadTarget(
         image.storagePath,
         source.bytes,
-        image.mimeType,
+        image.mimeType
       )
       successfulUploads.push(image.storagePath)
     }
@@ -262,7 +263,7 @@ export async function prepareAdvertisingImages(
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(3, snapshot.images.length) }, () => worker()),
+    Array.from({ length: Math.min(3, snapshot.images.length) }, () => worker())
   )
 
   if (failure) {

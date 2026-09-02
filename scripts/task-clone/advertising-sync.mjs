@@ -169,7 +169,7 @@ function normalizeStatus(raw) {
   }
 }
 
-async function loadRuntime() {
+export async function loadAdvertisingSyncRuntime() {
   const sourceInputs = await readDeploymentInputs(".env.deploy.local")
   const sourceErrors = validateDeploymentInputs(sourceInputs)
   if (sourceErrors.length > 0) throw new Error("源部署配置无效")
@@ -217,6 +217,15 @@ async function loadRuntime() {
       operation,
       readOnly,
     })
+  const sourceQuery = ({ sql, operation, readOnly = true }) =>
+    supabase.queryDatabase({
+      projectRef: sourceInputs.SUPABASE_PROJECT_REF,
+      region: source.region,
+      databasePassword: sourceInputs.SUPABASE_DB_PASSWORD,
+      sql,
+      operation,
+      readOnly,
+    })
   const readStatus = async () => {
     const result = await targetQuery({
       sql: buildAdvertisingSyncStatusSql(),
@@ -235,6 +244,7 @@ async function loadRuntime() {
     source,
     target,
     targetQuery,
+    sourceQuery,
     readStatus,
   }
 }
@@ -334,7 +344,7 @@ async function testTargetCommand() {
 
 async function executeCommand(command) {
   if (command === "test-target") return testTargetCommand()
-  const runtime = await loadRuntime()
+  const runtime = await loadAdvertisingSyncRuntime()
   if (command === "install") return installCommand(runtime)
   if (command === "trigger") {
     return triggerAdvertisingSync({
