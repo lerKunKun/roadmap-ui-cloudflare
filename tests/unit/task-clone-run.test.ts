@@ -47,6 +47,35 @@ describe("task clone orchestration", () => {
     expect(report).toEqual({ ok: true, differences: [] })
   })
 
+  it("accepts an already-provisioned admin during an idempotent deploy", () => {
+    const report = validateTargetReadyAudit(
+      {
+        projects: [{ id: "project" }],
+        items: [{ id: "item", voteBaseline: "0", voteCount: "0" }],
+        images: [],
+        storageObjects: [],
+        usedBytes: 0,
+        operationalCounts: {
+          votes: 0,
+          suggestionRateLimits: 0,
+          suggestionImageRateLimits: 0,
+        },
+        bucket: {
+          public: false,
+          fileSizeLimit: 5_000_000,
+          allowedMimeTypes: ["image/jpeg", "image/png"],
+        },
+        authUsers: [{ email: "roadmap-admin@internal.invalid" }],
+      },
+      {
+        expectedAuthEmails: [],
+        alternativeAuthEmailSets: [["roadmap-admin@internal.invalid"]],
+      },
+    )
+
+    expect(report).toEqual({ ok: true, differences: [] })
+  })
+
   it.each([
     ["sizeBytes", 999],
     ["mimeType", "text/plain"],

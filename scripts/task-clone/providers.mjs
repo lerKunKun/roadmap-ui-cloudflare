@@ -734,11 +734,23 @@ export function createCloudflareProvider({
       `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains`,
     )
     const existing = domains.find((domain) => domain.name === TARGET_DOMAIN)
-    if (existing) return existing
-    return request(
+    const domain = existing ?? await request(
       `/accounts/${accountId}/pages/projects/${TARGET_PAGES_PROJECT}/domains`,
       { method: "POST", body: JSON.stringify({ name: TARGET_DOMAIN }) },
     )
+    if (records.length === 0) {
+      await request(`/zones/${zoneId}/dns_records`, {
+        method: "POST",
+        body: JSON.stringify({
+          type: "CNAME",
+          name: TARGET_DOMAIN,
+          content: expectedTarget,
+          proxied: true,
+          ttl: 1,
+        }),
+      })
+    }
+    return domain
   }
 
   async function getDomain() {

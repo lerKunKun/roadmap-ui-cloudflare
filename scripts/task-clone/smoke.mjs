@@ -154,13 +154,15 @@ export async function runSmokeWorkflow(adapters) {
   return { ok: true }
 }
 
-function headersFor(key, bearer = key) {
-  return {
+export function headersFor(key, bearer = key) {
+  const headers = {
     apikey: key,
-    Authorization: `Bearer ${bearer}`,
-    "content-type": "application/json",
     "User-Agent": "task-roadmap-smoke/1.0",
   }
+  if (!/^sb_(?:publishable|secret)_/.test(bearer)) {
+    headers.Authorization = `Bearer ${bearer}`
+  }
+  return headers
 }
 
 async function checkedJson(response, message) {
@@ -185,11 +187,37 @@ async function publicCounters(inputs) {
   return { projects: projects.length, items: items.length, voteTotal }
 }
 
+export function cleanupFixtureRowsSql(ids) {
+  if (
+    !Array.isArray(ids) ||
+    ids.length === 0 ||
+    ids.some(
+      (id) =>
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          id,
+        ),
+    )
+  ) {
+    throw new Error("冒烟条目 ID 无效")
+  }
+  const values = ids.map((id) => `  '${id}'::uuid`).join(",\n")
+  return `begin;
+select pg_advisory_xact_lock(hashtextextended('task-roadmap-smoke-v1', 0));
+delete from public.roadmap_items
+where id in (
+${values}
+);
+commit;`
+}
+
 export function operationalSnapshotSql({ suggestionHash, imageHash }) {
   if (![suggestionHash, imageHash].every((value) => /^[a-f0-9]{64}$/.test(value))) {
     throw new Error("目标冒烟运行态哈希无效")
   }
   return `select jsonb_build_object(
+  'roadmapItems', coalesce((select jsonb_agg(jsonb_build_object(
+    'id', id, 'status', status, 'sortOrder', sort_order, 'updatedAt', updated_at
+  ) order by id) from public.roadmap_items), '[]'::jsonb),
   'suggestionRateLimits', coalesce((select jsonb_agg(jsonb_build_object(
     'ipHash', ip_hash, 'windowStartedAt', window_started_at, 'submissionCount', submission_count
   ) order by ip_hash, window_started_at) from public.suggestion_rate_limits
@@ -218,6 +246,23 @@ create temporary table task_smoke_state (document jsonb not null) on commit drop
 insert into task_smoke_state values (
   convert_from(decode($state$${payload}$state$, 'base64'), 'UTF8')::jsonb
 );
+alter table public.roadmap_items disable trigger roadmap_items_set_updated_at;
+alter table public.roadmap_items disable trigger roadmap_items_record_status_history;
+update public.roadmap_items as target
+set status = source."status",
+    sort_order = source."sortOrder",
+    updated_at = source."updatedAt"
+from task_smoke_state
+cross join lateral jsonb_to_recordset(
+  coalesce(document -> 'roadmapItems', '[]'::jsonb)
+) as source(
+  "id" uuid, "status" text, "sortOrder" integer, "updatedAt" timestamptz
+)
+where target.id = source."id"
+  and (target.status, target.sort_order, target.updated_at)
+    is distinct from (source."status", source."sortOrder", source."updatedAt");
+alter table public.roadmap_items enable trigger roadmap_items_record_status_history;
+alter table public.roadmap_items enable trigger roadmap_items_set_updated_at;
 delete from public.suggestion_rate_limits where ip_hash = '${suggestionHash}';
 delete from public.suggestion_image_rate_limits where ip_hash = '${imageHash}';
 insert into public.suggestion_rate_limits (ip_hash, window_started_at, submission_count)
@@ -347,11 +392,14 @@ function createProductionAdapters({
   async function selectFixtureProject(page) {
     const select = page.getByLabel("切换项目")
     await select.waitFor()
-    return select.inputValue()
+    const projectId = await select.inputValue()
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId)) {
+      throw new Error("目标页面没有可用项目")
+    }
+    return projectId
   }
 
   async function submitSuggestion(page, { title, description, image }) {
-    assertBrowserTarget()
     await page.getByRole("button", { name: "提交建议" }).click()
     const dialog = page.getByRole("dialog")
     await dialog.getByLabel("建议标题").fill(title)
@@ -519,13 +567,34 @@ function createProductionAdapters({
       const vote = dialog.getByRole("button", {
         name: `为“${fixtures.imageTitle}”投票`,
       })
-      await vote.click()
-      await activePage.getByRole("status").filter({ hasText: "投票成功" }).waitFor()
-      await vote.click()
-      await activePage
-        .getByRole("status")
-        .filter({ hasText: "当前网络已投过票" })
-        .waitFor()
+      const clickAndVerify = async (expectedNotice) => {
+        const responsePromise = activePage.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname === "/functions/v1/vote",
+        )
+        await vote.click()
+        const response = await responsePromise
+        const responseBody = await response.text()
+        if (!response.ok()) {
+          throw new Error(
+            `目标投票接口返回 ${response.status()}：${responseBody.slice(0, 500)}`,
+          )
+        }
+        try {
+          await activePage
+            .getByRole("status")
+            .filter({ hasText: expectedNotice })
+            .waitFor()
+        } catch {
+          const notices = await activePage.getByRole("status").allTextContents()
+          throw new Error(
+            `目标投票响应未呈现为“${expectedNotice}”：HTTP ${response.status()}，响应 ${responseBody.slice(0, 500)}，页面提示 ${JSON.stringify(notices)}`,
+          )
+        }
+      }
+      await clickAndVerify("投票成功")
+      await clickAndVerify("当前网络已投过票")
     },
     async cleanupFixtures(_browser, _fixtures, identity) {
       const rows = await locateFixtureRows([identity.textTitle, identity.imageTitle])
@@ -554,11 +623,10 @@ function createProductionAdapters({
         }
       }
       try {
-        const response = await fetch(
-          `${targetInputs.SUPABASE_URL}/rest/v1/roadmap_items?id=${idFilter}`,
-          { method: "DELETE", headers: authHeaders },
+        await queryTarget(
+          cleanupFixtureRowsSql(rows.map((row) => row.id)),
+          "清理冒烟 Roadmap 条目",
         )
-        if (!response.ok) cleanupErrors.push(new Error("冒烟 Roadmap 条目清理失败"))
       } catch (error) {
         cleanupErrors.push(error)
       }
@@ -661,7 +729,16 @@ const entryPoint = process.argv[1]
   : ""
 if (entryPoint === import.meta.url) {
   main().catch((error) => {
-    process.stderr.write(`${error.message}\n`)
+    const nested = error instanceof AggregateError
+      ? error.errors.flatMap((entry) =>
+          entry instanceof AggregateError
+            ? entry.errors.map((child) => child?.message ?? String(child))
+            : [entry?.message ?? String(entry)],
+        )
+      : []
+    process.stderr.write(
+      `${[error.message, ...nested].filter(Boolean).join("\n- ")}\n`,
+    )
     process.exitCode = 1
   })
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import * as taskSmoke from "../../scripts/task-clone/smoke.mjs"
+
 import {
   assertAllowedSmokeUrl,
   assertSupabaseRequestHost,
@@ -10,6 +12,42 @@ import {
 } from "../../scripts/task-clone/smoke.mjs"
 
 describe("task clone production smoke", () => {
+  it("keeps opaque Supabase API keys out of the Bearer JWT header", () => {
+    expect(taskSmoke.headersFor).toBeTypeOf("function")
+
+    const headers = taskSmoke.headersFor("sb_secret_test_key")
+
+    expect(headers.apikey).toBe("sb_secret_test_key")
+    expect(headers).not.toHaveProperty("Authorization")
+  })
+
+  it("omits a JSON content type from bodyless Supabase requests", () => {
+    expect(taskSmoke.headersFor("sb_secret_test_key")).not.toHaveProperty(
+      "content-type",
+    )
+  })
+
+  it("deletes smoke fixture rows through a validated database transaction", () => {
+    expect(taskSmoke.cleanupFixtureRowsSql).toBeTypeOf("function")
+
+    expect(
+      taskSmoke.cleanupFixtureRowsSql([
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+      ]),
+    ).toBe(`begin;
+select pg_advisory_xact_lock(hashtextextended('task-roadmap-smoke-v1', 0));
+delete from public.roadmap_items
+where id in (
+  '11111111-1111-4111-8111-111111111111'::uuid,
+  '22222222-2222-4222-8222-222222222222'::uuid
+);
+commit;`)
+    expect(() => taskSmoke.cleanupFixtureRowsSql(["unsafe'"])).toThrow(
+      "冒烟条目 ID 无效",
+    )
+  })
+
   it.each([
     "https://task-roadmap-ui.pages.dev",
     "https://task.telljax.com",
@@ -57,7 +95,21 @@ describe("task clone production smoke", () => {
     })
 
     expect(snapshotSql).toContain(`where ip_hash = '${hashes.suggestionHash}'`)
+    expect(snapshotSql).toContain("'roadmapItems'")
+    expect(snapshotSql).toContain("'updatedAt', updated_at")
     expect(restoreSql).toContain(`where ip_hash = '${hashes.imageHash}'`)
+    expect(restoreSql).toContain(
+      "alter table public.roadmap_items disable trigger roadmap_items_set_updated_at",
+    )
+    expect(restoreSql).toContain(
+      'set status = source."status"',
+    )
+    expect(restoreSql).toContain(
+      'updated_at = source."updatedAt"',
+    )
+    expect(restoreSql).toContain(
+      "alter table public.roadmap_items enable trigger roadmap_items_set_updated_at",
+    )
     expect(restoreSql).not.toContain("delete from public.votes")
     expect(() =>
       operationalSnapshotSql({ ...hashes, suggestionHash: "unsafe'" }),

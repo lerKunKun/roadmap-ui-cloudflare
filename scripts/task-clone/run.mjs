@@ -59,8 +59,11 @@ function projectRegion(project) {
 
 function ensureSuccessReport(report) {
   if (!report?.ok) {
+    const details = Array.isArray(report?.differences)
+      ? `：${report.differences.join("；")}`
+      : ""
     throw new Error(
-      `目标数据核对失败（${report?.differences?.length ?? 0} 项）`,
+      `目标数据核对失败（${report?.differences?.length ?? 0} 项）${details}`,
     )
   }
   return report
@@ -106,7 +109,14 @@ export function validateStageReceipts(
   return true
 }
 
-export function validateTargetReadyAudit(audit, { expectedAuthEmails }) {
+/**
+ * @param {Record<string, any>} audit
+ * @param {{ expectedAuthEmails: string[], alternativeAuthEmailSets?: string[][] }} options
+ */
+export function validateTargetReadyAudit(
+  audit,
+  { expectedAuthEmails, alternativeAuthEmailSets = [] },
+) {
   const differences = []
   const add = (condition, message) => {
     if (!condition) differences.push(message)
@@ -163,8 +173,10 @@ export function validateTargetReadyAudit(audit, { expectedAuthEmails }) {
   )
   const actualEmails = audit.authUsers.map((user) => user.email).sort()
   add(
-    JSON.stringify(actualEmails) ===
-      JSON.stringify([...expectedAuthEmails].sort()),
+    [expectedAuthEmails, ...alternativeAuthEmailSets].some(
+      (emails) =>
+        JSON.stringify(actualEmails) === JSON.stringify([...emails].sort()),
+    ),
     "目标 Auth 用户不符合预期",
   )
   return { ok: differences.length === 0, differences }
@@ -647,6 +659,7 @@ async function targetReadyReport({
   target,
   targetInputs,
   expectedAuthEmails,
+  alternativeAuthEmailSets,
   copyReceipt,
 }) {
   const targetQuery = queryFor(supabase, target, targetInputs)
@@ -662,7 +675,10 @@ async function targetReadyReport({
     },
     expectedProjectRef: targetInputs.SUPABASE_PROJECT_REF,
   })
-  const report = validateTargetReadyAudit(audit, { expectedAuthEmails })
+  const report = validateTargetReadyAudit(audit, {
+    expectedAuthEmails,
+    alternativeAuthEmailSets,
+  })
   const add = (condition, message) => {
     if (!condition) report.differences.push(message)
   }
@@ -740,6 +756,7 @@ async function deployStage() {
           target,
           targetInputs,
           expectedAuthEmails: [],
+          alternativeAuthEmailSets: [[TASK_ADMIN_EMAIL]],
           copyReceipt,
         }),
       ),

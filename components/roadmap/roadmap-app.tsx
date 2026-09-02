@@ -165,6 +165,7 @@ export function RoadmapApp() {
 
       <ItemDetails
         item={detailItem}
+        notice={roadmap.notice}
         voting={roadmap.votingItemId === detailItem?.id}
         onOpenChange={(open) => {
           if (!open) {

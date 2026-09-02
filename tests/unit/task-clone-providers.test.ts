@@ -646,6 +646,64 @@ describe("task clone Cloudflare provider", () => {
     expect(methods).toEqual(["GET"])
   })
 
+  it("creates the exact proxied CNAME when the domain has no DNS record", async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = []
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init)
+      requests.push({
+        url: request.url,
+        method: request.method,
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      })
+      if (request.url.includes("/dns_records") && request.method === "GET") {
+        return Response.json({ success: true, result: [] })
+      }
+      if (request.url.endsWith("/pages/projects")) {
+        return Response.json({ success: true, result: [] })
+      }
+      if (request.url.endsWith("/domains") && request.method === "GET") {
+        return Response.json({
+          success: true,
+          result: [{ name: "task.telljax.com", status: "pending" }],
+        })
+      }
+      if (request.url.includes("/dns_records") && request.method === "POST") {
+        return Response.json({
+          success: true,
+          result: {
+            name: "task.telljax.com",
+            type: "CNAME",
+            content: "task-roadmap-ui.pages.dev",
+            proxied: true,
+          },
+        })
+      }
+      return Response.json({ success: true, result: [] })
+    }
+    const provider = createCloudflareProvider({
+      accountId: "a".repeat(32),
+      zoneId: "b".repeat(32),
+      apiToken: "cloudflare-token",
+      fetchImpl,
+      runCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+    })
+
+    await expect(provider.bindDomain()).resolves.toMatchObject({
+      name: "task.telljax.com",
+      status: "pending",
+    })
+    expect(requests.at(-1)).toMatchObject({
+      method: "POST",
+      body: {
+        type: "CNAME",
+        name: "task.telljax.com",
+        content: "task-roadmap-ui.pages.dev",
+        proxied: true,
+        ttl: 1,
+      },
+    })
+  })
+
   it("accepts an existing target CNAME and active target Pages binding", async () => {
     const methods: string[] = []
     const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -24,6 +24,7 @@ import { useRoadmapHistory } from "@/features/roadmap/use-roadmap-history"
 
 interface ItemDetailsProps {
   item: RoadmapItem | null
+  notice: string | null
   voting: boolean
   onOpenChange(open: boolean): void
   onVote(itemId: string): void | Promise<void>
@@ -31,6 +32,7 @@ interface ItemDetailsProps {
 
 export function ItemDetails({
   item,
+  notice,
   voting,
   onOpenChange,
   onVote,
@@ -55,6 +57,15 @@ export function ItemDetails({
                 <CalendarDays className="size-3.5" />
                 创建于 {formatRoadmapDate(item.createdAt)}
               </DialogDescription>
+              {notice ? (
+                <div
+                  role="status"
+                  className="mt-1 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100"
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-blue-500" />
+                  <span>{notice}</span>
+                </div>
+              ) : null}
             </DialogHeader>
 
             <div className="grid min-h-0 overflow-y-auto md:grid-cols-[minmax(0,1.15fr)_minmax(17rem,0.85fr)]">

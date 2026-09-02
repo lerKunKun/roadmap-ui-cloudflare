@@ -46,12 +46,14 @@ const history: RoadmapStatusHistoryEntry[] = [
 
 function renderDetails(overrides?: {
   item?: RoadmapItem
+  notice?: string | null
   onOpenChange?: (open: boolean) => void
   onVote?: (itemId: string) => void
 }) {
   return render(
     <ItemDetails
       item={overrides?.item ?? item}
+      notice={overrides?.notice ?? null}
       voting={false}
       onOpenChange={overrides?.onOpenChange ?? vi.fn()}
       onVote={overrides?.onVote ?? vi.fn()}
@@ -246,6 +248,14 @@ describe("ItemDetails", () => {
       screen.getByRole("button", { name: `为“${item.title}”投票` })
     )
     expect(onVote).toHaveBeenCalledWith(item.id)
+  })
+
+  it("shows vote feedback inside the open detail dialog", () => {
+    renderDetails({ notice: "投票成功，感谢你的反馈" })
+
+    expect(
+      within(screen.getByRole("dialog")).getByRole("status")
+    ).toHaveTextContent("投票成功，感谢你的反馈")
   })
 
   it("notifies the parent when the dialog closes", async () => {
