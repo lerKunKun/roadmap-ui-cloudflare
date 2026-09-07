@@ -21,6 +21,7 @@ import {
   type AdminRoadmapImage,
   type RoadmapItemInput,
 } from "@/features/roadmap/admin-api"
+import { localDateInputValue } from "@/features/roadmap/calendar-date"
 import {
   STATUS_COLUMNS,
   type RoadmapItem,
@@ -57,6 +58,7 @@ export function ItemDialog({
   const [description, setDescription] = useState(item?.description ?? "")
   const [status, setStatus] = useState<RoadmapStatus>(item?.status ?? "pending")
   const [sortOrder, setSortOrder] = useState(item?.sortOrder ?? nextSortOrder)
+  const [createdDate, setCreatedDate] = useState(localDateInputValue)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [previewAttempt, setPreviewAttempt] = useState(0)
@@ -130,6 +132,7 @@ export function ItemDialog({
         description,
         status,
         sortOrder,
+        ...(!item ? { createdDate } : {}),
       })
       onOpenChange(false)
     } catch (saveError) {
@@ -170,6 +173,22 @@ export function ItemDialog({
               className="min-h-28 resize-y"
             />
           </div>
+          {!item ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="item-created-date">创建日期</Label>
+              <Input
+                id="item-created-date"
+                type="date"
+                value={createdDate}
+                max={localDateInputValue()}
+                onChange={(event) => setCreatedDate(event.target.value)}
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                可选择今天或过去日期，并作为时间轴的创建日期。
+              </p>
+            </div>
+          ) : null}
           {visiblePreview &&
           !(visiblePreview.status === "loaded" && !visiblePreview.image) ? (
             <div className="grid gap-1.5">

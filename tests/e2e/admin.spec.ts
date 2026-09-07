@@ -51,6 +51,7 @@ async function installAdminApi(
       ]
     : []
   const events: string[] = []
+  const createdItemPayloads: Array<Record<string, unknown>> = []
   const imageMetadata = options.imageItem
     ? {
         id: IMAGE_ID,
@@ -209,7 +210,8 @@ async function installAdminApi(
     const id = new URL(route.request().url()).searchParams.get("id")?.replace("eq.", "")
     if (method === "POST") {
       const payload = route.request().postDataJSON() as Record<string, unknown>
-      const created = { id: CREATED_ITEM_ID, ...payload, created_at: timestamp, updated_at: timestamp }
+      createdItemPayloads.push(payload)
+      const created = { id: CREATED_ITEM_ID, ...payload, updated_at: timestamp }
       items.push(created)
       return json(route, created, 201)
     }
@@ -229,7 +231,7 @@ async function installAdminApi(
     return json(route, [])
   })
 
-  return { events }
+  return { events, createdItemPayloads }
 }
 
 async function login(page: Page) {
@@ -240,7 +242,7 @@ async function login(page: Page) {
 }
 
 test("管理端仅需密码并完成项目与条目 CRUD", async ({ page }) => {
-  await installAdminApi(page)
+  const fixture = await installAdminApi(page)
   await page.goto("/admin/")
 
   await expect(page.getByLabel("管理密码")).toHaveAttribute("type", "password")
@@ -266,8 +268,12 @@ test("管理端仅需密码并完成项目与条目 CRUD", async ({ page }) => {
   await page.getByRole("button", { name: "Roadmap 条目" }).click()
   await page.getByLabel("标题").fill("批量生成模板")
   await page.getByLabel("详细说明").fill("支持批量数据导入")
+  await page.getByLabel("创建日期").fill("2025-03-08")
   await page.getByRole("button", { name: "保存条目" }).click()
   await expect(page.getByRole("heading", { name: "批量生成模板" })).toBeVisible()
+  expect(fixture.createdItemPayloads).toEqual([
+    expect.objectContaining({ created_at: "2025-03-08T00:00:00.000Z" }),
+  ])
 
   await page.getByLabel("调整“批量生成模板”阶段").selectOption("in_progress")
   await expect(page.getByRole("region", { name: "进行中" }).getByRole("heading", { name: "批量生成模板" })).toBeVisible()

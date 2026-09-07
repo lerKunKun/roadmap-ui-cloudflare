@@ -103,6 +103,61 @@ describe("admin Roadmap API", () => {
     })
   })
 
+  it("创建条目时把所选日期作为 UTC 零点写入 created_at", async () => {
+    const itemSingle = vi.fn().mockResolvedValue({
+      data: { ...itemRow, created_at: "2025-03-08T00:00:00.000Z" },
+      error: null,
+    })
+    const itemSelect = vi.fn(() => ({ single: itemSingle }))
+    const insert = vi.fn(() => ({ select: itemSelect }))
+    const metadataMaybeSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: null,
+    })
+    const metadataEq = vi.fn(() => ({ maybeSingle: metadataMaybeSingle }))
+    const metadataSelect = vi.fn(() => ({ eq: metadataEq }))
+    getSupabaseBrowserClient.mockReturnValue({
+      from: vi.fn((table: string) =>
+        table === "roadmap_items" ? { insert } : { select: metadataSelect }
+      ),
+    })
+
+    await createRoadmapItem({
+      projectId,
+      title: itemRow.title,
+      description: itemRow.description,
+      status: "approved",
+      sortOrder: 0,
+      createdDate: "2025-03-08",
+    })
+
+    expect(insert).toHaveBeenCalledWith({
+      project_id: projectId,
+      title: itemRow.title,
+      description: itemRow.description,
+      status: "approved",
+      sort_order: 0,
+      created_at: "2025-03-08T00:00:00.000Z",
+    })
+  })
+
+  it("拒绝未来创建日期且不访问数据库", async () => {
+    const from = vi.fn()
+    getSupabaseBrowserClient.mockReturnValue({ from })
+
+    await expect(
+      createRoadmapItem({
+        projectId,
+        title: itemRow.title,
+        description: itemRow.description,
+        status: "approved",
+        sortOrder: 0,
+        createdDate: "2999-01-01",
+      })
+    ).rejects.toThrow("创建日期不能晚于今天")
+    expect(from).not.toHaveBeenCalled()
+  })
+
   it("创建条目后从认证元数据补全已有公开图片", async () => {
     const itemSingle = vi.fn().mockResolvedValue({ data: itemRow, error: null })
     const itemSelect = vi.fn(() => ({ single: itemSingle }))

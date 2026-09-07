@@ -97,6 +97,40 @@ describe("ItemDialog admin image preview", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("新建条目默认今天并提交所选的过去创建日期", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const today = new Date()
+    const expectedToday = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-")
+    renderDialog({ item: null, onSave })
+
+    const dateInput = screen.getByLabelText("创建日期")
+    expect(dateInput).toHaveAttribute("type", "date")
+    expect(dateInput).toHaveAttribute("max", expectedToday)
+    expect(dateInput).toHaveValue(expectedToday)
+
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "历史 Roadmap 条目" },
+    })
+    fireEvent.change(dateInput, { target: { value: "2025-03-08" } })
+    fireEvent.submit(dateInput.closest("form")!)
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ createdDate: "2025-03-08" })
+      )
+    })
+  })
+
+  it("编辑已有条目时不显示创建日期控件", () => {
+    renderDialog()
+
+    expect(screen.queryByLabelText("创建日期")).not.toBeInTheDocument()
+  })
+
   it("显示签名预览并使用包含布局和可访问替代文本", async () => {
     renderDialog()
 

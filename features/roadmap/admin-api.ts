@@ -2,6 +2,11 @@ import { z } from "zod"
 
 import { listProjects, listRoadmapItems, mapProjectRow } from "@/features/roadmap/api"
 import {
+  createdDateTimestamp,
+  isValidDateInput,
+  localDateInputValue,
+} from "@/features/roadmap/calendar-date"
+import {
   isRoadmapStatus,
   type Project,
   type RoadmapItem,
@@ -22,6 +27,7 @@ export interface RoadmapItemInput {
   description: string
   status: RoadmapStatus
   sortOrder: number
+  createdDate?: string
 }
 
 export interface AdminRoadmapImage {
@@ -77,6 +83,14 @@ const itemSchema = z.object({
     "rejected",
   ]),
   sortOrder: z.number().int().min(0),
+  createdDate: z
+    .string()
+    .refine(isValidDateInput, "创建日期无效")
+    .refine(
+      (value) => value <= localDateInputValue(),
+      "创建日期不能晚于今天"
+    )
+    .optional(),
 })
 
 function normalizeProjectUrl(value?: string | null): string | null {
@@ -106,14 +120,27 @@ function projectPayload(input: ProjectInput) {
   }
 }
 
-function itemPayload(input: RoadmapItemInput) {
-  const parsed = itemSchema.parse(input)
+function itemPayloadFromParsed(parsed: z.infer<typeof itemSchema>) {
   return {
     project_id: parsed.projectId,
     title: parsed.title,
     description: parsed.description,
     status: parsed.status,
     sort_order: parsed.sortOrder,
+  }
+}
+
+function itemPayload(input: RoadmapItemInput) {
+  return itemPayloadFromParsed(itemSchema.parse(input))
+}
+
+function createItemPayload(input: RoadmapItemInput) {
+  const parsed = itemSchema.parse(input)
+  return {
+    ...itemPayloadFromParsed(parsed),
+    ...(parsed.createdDate
+      ? { created_at: createdDateTimestamp(parsed.createdDate) }
+      : {}),
   }
 }
 
@@ -258,9 +285,10 @@ export async function deleteProject(id: string): Promise<void> {
 }
 
 export async function createRoadmapItem(input: RoadmapItemInput): Promise<RoadmapItem> {
+  const payload = createItemPayload(input)
   const { data, error } = await getSupabaseBrowserClient()
     .from("roadmap_items")
-    .insert(itemPayload(input))
+    .insert(payload)
     .select("id,project_id,title,description,status,sort_order,created_at,updated_at")
     .single()
 
