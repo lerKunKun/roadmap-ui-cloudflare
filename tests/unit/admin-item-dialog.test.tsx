@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ItemDialog } from "@/components/admin/item-dialog"
 import { getAdminRoadmapItemImage } from "@/features/roadmap/admin-api"
@@ -74,6 +74,10 @@ describe("ItemDialog admin image preview", () => {
     vi.mocked(getAdminRoadmapItemImage).mockResolvedValue(preview)
   })
 
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it("只为已有条目加载预览并显示独立骨架", () => {
     vi.mocked(getAdminRoadmapItemImage).mockReturnValue(
       new Promise(() => undefined)
@@ -98,19 +102,15 @@ describe("ItemDialog admin image preview", () => {
   })
 
   it("新建条目默认今天并提交所选的过去创建日期", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(2026, 8, 7, 12))
     const onSave = vi.fn().mockResolvedValue(undefined)
-    const today = new Date()
-    const expectedToday = [
-      today.getFullYear(),
-      String(today.getMonth() + 1).padStart(2, "0"),
-      String(today.getDate()).padStart(2, "0"),
-    ].join("-")
     renderDialog({ item: null, onSave })
 
     const dateInput = screen.getByLabelText("创建日期")
     expect(dateInput).toHaveAttribute("type", "date")
-    expect(dateInput).toHaveAttribute("max", expectedToday)
-    expect(dateInput).toHaveValue(expectedToday)
+    expect(dateInput).toHaveAttribute("max", "2026-09-07")
+    expect(dateInput).toHaveValue("2026-09-07")
 
     fireEvent.change(screen.getByLabelText("标题"), {
       target: { value: "历史 Roadmap 条目" },

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const { getSupabaseBrowserClient } = vi.hoisted(() => ({
   getSupabaseBrowserClient: vi.fn(),
@@ -37,6 +37,10 @@ describe("admin Roadmap API", () => {
 
   beforeEach(() => {
     getSupabaseBrowserClient.mockReset()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("规范化项目网址并发送 snake_case 字段", async () => {
@@ -159,12 +163,8 @@ describe("admin Roadmap API", () => {
   })
 
   it("创建条目后从认证元数据补全已有公开图片", async () => {
-    const today = new Date()
-    const expectedCreatedAt = `${[
-      today.getFullYear(),
-      String(today.getMonth() + 1).padStart(2, "0"),
-      String(today.getDate()).padStart(2, "0"),
-    ].join("-")}T00:00:00.000Z`
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(2026, 8, 7, 12))
     const itemSingle = vi.fn().mockResolvedValue({ data: itemRow, error: null })
     const itemSelect = vi.fn(() => ({ single: itemSingle }))
     const insert = vi.fn(() => ({ select: itemSelect }))
@@ -198,7 +198,7 @@ describe("admin Roadmap API", () => {
     expect(from).toHaveBeenCalledWith("roadmap_item_images")
     expect(metadataEq).toHaveBeenCalledWith("roadmap_item_id", itemId)
     expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({ created_at: expectedCreatedAt })
+      expect.objectContaining({ created_at: "2026-09-07T00:00:00.000Z" })
     )
     expect(created).toMatchObject({ hasImage: true, imageId })
   })
