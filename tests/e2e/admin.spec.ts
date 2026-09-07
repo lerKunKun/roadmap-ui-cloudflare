@@ -52,6 +52,7 @@ async function installAdminApi(
     : []
   const events: string[] = []
   const createdItemPayloads: Array<Record<string, unknown>> = []
+  const updatedItemPayloads: Array<Record<string, unknown>> = []
   const imageMetadata = options.imageItem
     ? {
         id: IMAGE_ID,
@@ -217,6 +218,7 @@ async function installAdminApi(
     }
     if (method === "PATCH") {
       const payload = route.request().postDataJSON() as Record<string, unknown>
+      updatedItemPayloads.push(payload)
       const entry = items.find((candidate) => candidate.id === id)!
       Object.assign(entry, payload, { updated_at: timestamp })
       const wantsRepresentation = route.request().headers()["prefer"]?.includes("return=representation")
@@ -231,7 +233,7 @@ async function installAdminApi(
     return json(route, [])
   })
 
-  return { events, createdItemPayloads }
+  return { events, createdItemPayloads, updatedItemPayloads }
 }
 
 async function login(page: Page) {
@@ -268,6 +270,9 @@ test("管理端仅需密码并完成项目与条目 CRUD", async ({ page }) => {
   await page.getByRole("button", { name: "Roadmap 条目" }).click()
   await page.getByLabel("标题").fill("批量生成模板")
   await page.getByLabel("详细说明").fill("支持批量数据导入")
+  await page.getByLabel("创建日期").fill("2999-01-01")
+  await page.getByRole("button", { name: "保存条目" }).click()
+  expect(fixture.createdItemPayloads).toHaveLength(0)
   await page.getByLabel("创建日期").fill("2025-03-08")
   await page.getByRole("button", { name: "保存条目" }).click()
   await expect(page.getByRole("heading", { name: "批量生成模板" })).toBeVisible()
@@ -305,6 +310,7 @@ test("管理端签名预览不阻塞阶段调整且先删 Storage 再删条目",
 
   await page.getByRole("button", { name: "编辑“待审核截图建议”" }).click()
   const dialog = page.getByRole("dialog")
+  await expect(dialog.getByLabel("创建日期")).toHaveCount(0)
   const preview = dialog.getByRole("img", {
     name: "待审核建议图片：待审核截图建议",
   })
@@ -366,6 +372,9 @@ test("管理端签名预览不阻塞阶段调整且先删 Storage 再删条目",
       .getByRole("region", { name: "已批准" })
       .getByRole("heading", { name: "待审核截图建议" })
   ).toBeVisible()
+  expect(fixture.updatedItemPayloads).toEqual([
+    expect.not.objectContaining({ created_at: expect.anything() }),
+  ])
 
   page.once("dialog", (confirmation) => confirmation.accept())
   await page.getByRole("button", { name: "删除“待审核截图建议”" }).click()

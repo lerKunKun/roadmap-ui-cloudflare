@@ -136,11 +136,10 @@ function itemPayload(input: RoadmapItemInput) {
 
 function createItemPayload(input: RoadmapItemInput) {
   const parsed = itemSchema.parse(input)
+  const createdDate = parsed.createdDate ?? localDateInputValue()
   return {
     ...itemPayloadFromParsed(parsed),
-    ...(parsed.createdDate
-      ? { created_at: createdDateTimestamp(parsed.createdDate) }
-      : {}),
+    created_at: createdDateTimestamp(createdDate),
   }
 }
 

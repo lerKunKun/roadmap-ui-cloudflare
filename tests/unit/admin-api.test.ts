@@ -159,6 +159,12 @@ describe("admin Roadmap API", () => {
   })
 
   it("创建条目后从认证元数据补全已有公开图片", async () => {
+    const today = new Date()
+    const expectedCreatedAt = `${[
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-")}T00:00:00.000Z`
     const itemSingle = vi.fn().mockResolvedValue({ data: itemRow, error: null })
     const itemSelect = vi.fn(() => ({ single: itemSingle }))
     const insert = vi.fn(() => ({ select: itemSelect }))
@@ -191,6 +197,9 @@ describe("admin Roadmap API", () => {
 
     expect(from).toHaveBeenCalledWith("roadmap_item_images")
     expect(metadataEq).toHaveBeenCalledWith("roadmap_item_id", itemId)
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ created_at: expectedCreatedAt })
+    )
     expect(created).toMatchObject({ hasImage: true, imageId })
   })
 
@@ -229,6 +238,13 @@ describe("admin Roadmap API", () => {
       sortOrder: 0,
     })
 
+    expect(update).toHaveBeenCalledWith({
+      project_id: projectId,
+      title: itemRow.title,
+      description: itemRow.description,
+      status: "rejected",
+      sort_order: 0,
+    })
     expect(updated).toMatchObject({ hasImage: true, imageId: null })
   })
 
