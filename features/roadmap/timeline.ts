@@ -1,6 +1,7 @@
 import {
   STATUS_COLUMNS,
   type RoadmapItem,
+  type RoadmapReply,
   type RoadmapStatus,
   type RoadmapStatusHistoryEntry,
   type RoadmapTimelineEvent,
@@ -40,6 +41,7 @@ function statusLabel(status: RoadmapStatus): string {
 export function buildRoadmapTimeline(
   item: RoadmapItem,
   history: RoadmapStatusHistoryEntry[],
+  replies: RoadmapReply[] = [],
 ): RoadmapTimelineGroup[] {
   const createdDate = formatRoadmapDate(item.createdAt)
   const createdEvent: RoadmapTimelineEvent = {
@@ -47,13 +49,19 @@ export function buildRoadmapTimeline(
     kind: "created",
     label: "任务创建",
   }
-  const groups = new Map<string, RoadmapTimelineEvent[]>([
-    [createdDate, [createdEvent]],
-  ])
+  const groups = new Map<string, { time: number; event: RoadmapTimelineEvent }[]>()
+  groups.set(createdDate, [{ time: -Infinity, event: createdEvent }])
   let mergedInitialStatus = false
 
+  function addEvent(date: string, timestamp: string, event: RoadmapTimelineEvent) {
+    const entry = { time: Date.parse(timestamp), event }
+    const events = groups.get(date)
+    if (events) events.push(entry)
+    else groups.set(date, [entry])
+  }
+
   const sortedHistory = [...history].sort((left, right) => {
-    const timeOrder = left.changedAt.localeCompare(right.changedAt)
+    const timeOrder = Date.parse(left.changedAt) - Date.parse(right.changedAt)
     return timeOrder === 0 ? left.id - right.id : timeOrder
   })
 
@@ -85,15 +93,22 @@ export function buildRoadmapTimeline(
           toStatus: entry.toStatus,
         }
 
-    const events = groups.get(date)
-    if (events) {
-      events.push(event)
-    } else {
-      groups.set(date, [event])
-    }
+    addEvent(date, entry.changedAt, event)
+  }
+
+  for (const reply of replies) {
+    addEvent(formatRoadmapDate(reply.createdAt), reply.createdAt, {
+      key: `reply-${reply.id}`,
+      kind: "reply",
+      label: "管理员回复",
+      body: reply.body,
+    })
   }
 
   return [...groups.entries()]
     .sort(([leftDate], [rightDate]) => leftDate.localeCompare(rightDate))
-    .map(([date, events]) => ({ date, events }))
+    .map(([date, events]) => ({
+      date,
+      events: events.sort((left, right) => left.time - right.time).map(({ event }) => event),
+    }))
 }

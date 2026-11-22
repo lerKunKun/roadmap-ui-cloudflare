@@ -7,6 +7,7 @@ import { AdminBoard } from "@/components/admin/admin-board"
 import { AdminLogin } from "@/components/admin/admin-login"
 import { AdminToolbar } from "@/components/admin/admin-toolbar"
 import { ItemDialog } from "@/components/admin/item-dialog"
+import { usesSourceReplies } from "@/features/roadmap/replies"
 import { ProjectDialog } from "@/components/admin/project-dialog"
 import { Button } from "@/components/ui/button"
 import { useAdminSession } from "@/features/admin/use-admin-session"
@@ -219,6 +220,9 @@ function AdminWorkspace({ onLogout }: { onLogout(): Promise<void> }) {
         <ItemDialog
           key={itemEditor === "new" ? `new-${selectedProject.id}` : itemEditor.id}
           item={itemEditor === "new" ? null : itemEditor}
+          repliesFromSource={usesSourceReplies(projects.find((project) =>
+            project.id === (itemEditor === "new" ? selectedProject.id : itemEditor.projectId)
+          )?.slug)}
           projectId={selectedProject.id}
           nextSortOrder={items.filter((item) => item.status === "pending").length}
           onOpenChange={(open) => { if (!open) setItemEditor(null) }}

@@ -24,6 +24,19 @@ const item: RoadmapItem = {
 }
 
 describe("Roadmap timeline", () => {
+  it("places replies between the surrounding status changes on the same day", () => {
+    const history: RoadmapStatusHistoryEntry[] = [
+      { id: 1, roadmapItemId: item.id, fromStatus: "pending", toStatus: "approved", changedAt: "2026-08-25T01:00:00Z" },
+      { id: 2, roadmapItemId: item.id, fromStatus: "approved", toStatus: "in_progress", changedAt: "2026-08-25T03:00:00Z" },
+    ]
+    const replies = [{ id: "reply-1", body: "已安排开发", createdAt: "2026-08-25T02:00:00+00:00" }]
+    expect(buildRoadmapTimeline(item, history, replies)[1].events).toMatchObject([
+      { kind: "transition", toStatus: "approved" },
+      { kind: "reply", label: "管理员回复", body: "已安排开发" },
+      { kind: "transition", toStatus: "in_progress" },
+    ])
+  })
+
   it("formats the day in Asia/Shanghai", () => {
     expect(formatRoadmapDate("2026-08-24T16:30:00.000Z")).toBe(
       "2026-08-25",

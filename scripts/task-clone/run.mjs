@@ -821,6 +821,8 @@ async function deployStage() {
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
             targetInputs.SUPABASE_PUBLISHABLE_KEY,
           NEXT_PUBLIC_ADMIN_EMAIL: targetInputs.ADMIN_EMAIL,
+          NEXT_PUBLIC_ADVERTISING_REPLY_SOURCE_URL: sourceInputs.SUPABASE_URL,
+          NEXT_PUBLIC_ADVERTISING_REPLY_SOURCE_KEY: sourceInputs.SUPABASE_PUBLISHABLE_KEY,
           NEXT_PUBLIC_DEPLOY_COMMIT: git.stdout.trim(),
         },
         commitHash: git.stdout.trim(),

@@ -8,6 +8,9 @@ import type { RoadmapStatusHistoryEntry } from "@/features/roadmap/types"
 vi.mock("@/features/roadmap/api", () => ({
   listRoadmapStatusHistory: vi.fn(),
 }))
+vi.mock("@/features/roadmap/replies", () => ({
+  listRoadmapReplies: vi.fn().mockResolvedValue([]),
+}))
 
 function deferred<T>() {
   let resolve!: (value: T) => void

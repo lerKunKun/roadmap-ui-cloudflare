@@ -3,18 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { listRoadmapStatusHistory } from "@/features/roadmap/api"
-import type { RoadmapStatusHistoryEntry } from "@/features/roadmap/types"
+import { listRoadmapReplies } from "@/features/roadmap/replies"
+import type { RoadmapReply, RoadmapStatusHistoryEntry } from "@/features/roadmap/types"
 
 export interface RoadmapHistoryState {
   entries: RoadmapStatusHistoryEntry[]
+  replies: RoadmapReply[]
   loading: boolean
   error: string | null
   retry(): void
 }
 
-export function useRoadmapHistory(itemId: string | null): RoadmapHistoryState {
+export function useRoadmapHistory(itemId: string | null, fromSource = false): RoadmapHistoryState {
   const [stateItemId, setStateItemId] = useState(itemId)
   const [entries, setEntries] = useState<RoadmapStatusHistoryEntry[]>([])
+  const [replies, setReplies] = useState<RoadmapReply[]>([])
   const [loading, setLoading] = useState(Boolean(itemId))
   const [error, setError] = useState<string | null>(null)
   const [retryToken, setRetryToken] = useState(0)
@@ -29,26 +32,32 @@ export function useRoadmapHistory(itemId: string | null): RoadmapHistoryState {
         if (requestVersion.current === currentVersion) {
           setStateItemId(null)
           setEntries([])
+          setReplies([])
           setLoading(false)
           setError(null)
         }
       })
     } else {
-      const historyRequest = listRoadmapStatusHistory(itemId)
+      const historyRequest = Promise.all([
+        listRoadmapStatusHistory(itemId),
+        listRoadmapReplies(itemId, fromSource),
+      ])
 
       void Promise.resolve().then(() => {
         if (requestVersion.current === currentVersion) {
           setStateItemId(itemId)
           setEntries([])
+          setReplies([])
           setLoading(true)
           setError(null)
         }
       })
 
       void historyRequest
-        .then((nextEntries) => {
+        .then(([nextEntries, nextReplies]) => {
           if (requestVersion.current === currentVersion) {
             setEntries(nextEntries)
+            setReplies(nextReplies)
           }
         })
         .catch((loadError: unknown) => {
@@ -72,7 +81,7 @@ export function useRoadmapHistory(itemId: string | null): RoadmapHistoryState {
         requestVersion.current += 1
       }
     }
-  }, [itemId, retryToken])
+  }, [itemId, fromSource, retryToken])
 
   const retry = useCallback(() => {
     if (itemId) {
@@ -81,10 +90,10 @@ export function useRoadmapHistory(itemId: string | null): RoadmapHistoryState {
   }, [itemId])
 
   if (!itemId) {
-    return { entries: [], loading: false, error: null, retry }
+    return { entries: [], replies: [], loading: false, error: null, retry }
   }
 
   return stateItemId === itemId
-    ? { entries, loading, error, retry }
-    : { entries: [], loading: true, error: null, retry }
+    ? { entries, replies, loading, error, retry }
+    : { entries: [], replies: [], loading: true, error: null, retry }
 }

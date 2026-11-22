@@ -1,4 +1,4 @@
-import { Clock3, RefreshCw } from "lucide-react"
+import { Clock3, MessageSquare, RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -77,11 +77,11 @@ export function ItemTimeline({
       ) : null}
 
       {!loading && !error ? (
-        <div className="space-y-5">
+        <ol className="space-y-5">
           {groups.map((group) => (
-            <div
+            <li
               key={group.date}
-              className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-3"
+              className="grid min-w-0 gap-2 sm:grid-cols-[5rem_minmax(0,1fr)] sm:gap-3"
             >
               <time
                 dateTime={group.date}
@@ -96,9 +96,19 @@ export function ItemTimeline({
                   return (
                     <div key={event.key} className="relative min-w-0">
                       <span className="absolute top-1.5 -left-[1.25rem] size-2 rounded-full border-2 border-background bg-primary ring-1 ring-primary/25" />
-                      <p className="text-sm leading-5 font-medium">
-                        {event.label}
-                      </p>
+                      {event.kind === "reply" ? (
+                        <div className="rounded-lg border bg-muted/40 px-3 py-2.5">
+                          <p className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                            <MessageSquare aria-hidden="true" className="size-3.5" />
+                            {event.label}
+                          </p>
+                          <p className="mt-1.5 text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
+                            {event.body}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-sm leading-5 font-medium">{event.label}</p>
+                      )}
                       {detail ? (
                         <Badge variant="secondary" className="mt-1.5">
                           {detail}
@@ -108,9 +118,9 @@ export function ItemTimeline({
                   )
                 })}
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
       ) : null}
     </section>
   )

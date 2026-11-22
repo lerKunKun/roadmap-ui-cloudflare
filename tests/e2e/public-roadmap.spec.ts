@@ -111,6 +111,16 @@ async function installPublicApi(page: Page, extraItemCount = 0) {
       })
     }
   )
+  await page.route("https://e2e.supabase.co/rest/v1/roadmap_item_replies**", async (route) => {
+    const itemId = new URL(route.request().url()).searchParams.get("roadmap_item_id")
+    await route.fulfill({
+      json: itemId === `eq.${ITEM_ALERT}` ? [{
+        id: "reply-1",
+        body: "已安排开发，下次更新同步进展。",
+        created_at: "2026-08-25T02:00:00.000Z",
+      }] : [],
+    })
+  })
   await page.route(
     "https://e2e.supabase.co/functions/v1/submit-suggestion",
     async (route) => {
@@ -292,6 +302,11 @@ test("详情弹窗按每次打开刷新状态时间轴并适配移动端", async
     dialog.getByRole("region", { name: "进展时间轴" })
   ).toContainText("2026-08-24")
   await expect(dialog).not.toContainText("待处理 → 已批准")
+  const timeline = dialog.getByRole("region", { name: "进展时间轴" })
+  await expect(timeline).toContainText("已安排开发，下次更新同步进展。")
+  const descriptionBox = await dialog.getByText("详细说明", { exact: true }).boundingBox()
+  const timelineBox = await timeline.boundingBox()
+  expect(timelineBox!.y).toBeGreaterThan(descriptionBox!.y + descriptionBox!.height)
 
   await dialog.getByRole("button", { name: "关闭" }).click()
   await expect(dialog).toBeHidden()

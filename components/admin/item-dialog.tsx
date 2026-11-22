@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
+import { ItemReplies } from "@/components/admin/item-replies"
 import { ImageLightbox } from "@/components/roadmap/image-lightbox"
 import {
   Dialog,
@@ -30,6 +31,7 @@ import {
 
 interface ItemDialogProps {
   item: RoadmapItem | null
+  repliesFromSource?: boolean
   projectId: string
   nextSortOrder: number
   onOpenChange(open: boolean): void
@@ -49,6 +51,7 @@ type PreviewState =
 
 export function ItemDialog({
   item,
+  repliesFromSource = false,
   projectId,
   nextSortOrder,
   onOpenChange,
@@ -280,6 +283,7 @@ export function ItemDialog({
             </Button>
           </DialogFooter>
         </form>
+        {item ? <ItemReplies item={item} fromSource={repliesFromSource} /> : null}
       </DialogContent>
     </Dialog>
   )

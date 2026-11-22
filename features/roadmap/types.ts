@@ -42,7 +42,14 @@ export interface RoadmapStatusHistoryEntry {
   changedAt: string
 }
 
+export interface RoadmapReply {
+  id: string
+  body: string
+  createdAt: string
+}
+
 export type RoadmapTimelineEvent =
+  | { key: string; kind: "reply"; label: string; body: string }
   | {
       key: string
       kind: "created"

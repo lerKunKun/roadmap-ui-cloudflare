@@ -24,6 +24,7 @@ import { useRoadmapHistory } from "@/features/roadmap/use-roadmap-history"
 
 interface ItemDetailsProps {
   item: RoadmapItem | null
+  repliesFromSource?: boolean
   notice: string | null
   voting: boolean
   onOpenChange(open: boolean): void
@@ -32,14 +33,15 @@ interface ItemDetailsProps {
 
 export function ItemDetails({
   item,
+  repliesFromSource = false,
   notice,
   voting,
   onOpenChange,
   onVote,
 }: ItemDetailsProps) {
   const status = STATUS_COLUMNS.find((column) => column.value === item?.status)
-  const history = useRoadmapHistory(item?.id ?? null)
-  const timelineGroups = item ? buildRoadmapTimeline(item, history.entries) : []
+  const history = useRoadmapHistory(item?.id ?? null, repliesFromSource)
+  const timelineGroups = item ? buildRoadmapTimeline(item, history.entries, history.replies) : []
 
   return (
     <Dialog open={Boolean(item)} onOpenChange={onOpenChange}>
@@ -68,13 +70,13 @@ export function ItemDetails({
               ) : null}
             </DialogHeader>
 
-            <div className="grid min-h-0 overflow-y-auto md:grid-cols-[minmax(0,1.15fr)_minmax(17rem,0.85fr)]">
-              <div className="p-5 md:border-r">
+            <div className="min-h-0 overflow-y-auto">
+              <div className="p-5">
                 <ItemImage key={item.id} item={item} />
                 <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                   详细说明
                 </h3>
-                <p className="text-sm leading-7 whitespace-pre-wrap">
+                <p className="text-sm leading-7 whitespace-pre-wrap wrap-anywhere">
                   {item.description || "该条目暂时没有补充说明。"}
                 </p>
                 <Separator className="my-6" />
@@ -97,7 +99,7 @@ export function ItemDetails({
                   </Button>
                 </div>
               </div>
-              <div className="border-t md:border-t-0">
+              <div className="border-t">
                 <ItemTimeline
                   groups={timelineGroups}
                   loading={history.loading}

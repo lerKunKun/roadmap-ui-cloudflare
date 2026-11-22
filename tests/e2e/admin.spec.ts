@@ -53,6 +53,7 @@ async function installAdminApi(
   const events: string[] = []
   const createdItemPayloads: Array<Record<string, unknown>> = []
   const updatedItemPayloads: Array<Record<string, unknown>> = []
+  const replies: Array<{ id: string; roadmap_item_id: string; body: string; created_at: string }> = []
   const imageMetadata = options.imageItem
     ? {
         id: IMAGE_ID,
@@ -93,6 +94,23 @@ async function installAdminApi(
     })
   })
   await page.route("https://e2e.supabase.co/auth/v1/logout**", (route) => route.fulfill({ status: 204 }))
+  await page.route("https://e2e.supabase.co/rest/v1/roadmap_status_history_public**", (route) => json(route, []))
+  await page.route("https://e2e.supabase.co/rest/v1/roadmap_item_replies**", async (route) => {
+    if (route.request().method() === "POST") {
+      expect(route.request().postDataJSON()).toEqual({
+        roadmap_item_id: IMAGE_ITEM_ID,
+        body: "正在确认复现步骤。",
+      })
+      replies.push({
+        id: "reply-1",
+        roadmap_item_id: IMAGE_ITEM_ID,
+        body: "正在确认复现步骤。",
+        created_at: timestamp,
+      })
+      return route.fulfill({ status: 201 })
+    }
+    return json(route, replies)
+  })
 
   await page.route("https://e2e.supabase.co/rest/v1/projects**", async (route) => {
     const method = route.request().method()
@@ -311,6 +329,10 @@ test("管理端签名预览不阻塞阶段调整且先删 Storage 再删条目",
   await page.getByRole("button", { name: "编辑“待审核截图建议”" }).click()
   const dialog = page.getByRole("dialog")
   await expect(dialog.getByLabel("创建日期")).toHaveCount(0)
+  await dialog.getByLabel("管理员回复").fill("正在确认复现步骤。")
+  await dialog.getByRole("button", { name: "发布回复" }).click()
+  await expect(dialog.getByRole("status")).toContainText("回复已发布到公开时间轴")
+  await expect(dialog.getByRole("region", { name: "进展时间轴" })).toContainText("正在确认复现步骤。")
   const preview = dialog.getByRole("img", {
     name: "待审核建议图片：待审核截图建议",
   })

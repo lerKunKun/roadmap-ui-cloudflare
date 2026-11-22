@@ -17,6 +17,7 @@ import { SuggestionDialog } from "@/components/roadmap/suggestion-dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useRoadmap } from "@/features/roadmap/use-roadmap"
+import { usesSourceReplies } from "@/features/roadmap/replies"
 import type { RoadmapItem } from "@/features/roadmap/types"
 
 export function RoadmapApp() {
@@ -166,6 +167,7 @@ export function RoadmapApp() {
 
       <ItemDetails
         item={detailItem}
+        repliesFromSource={usesSourceReplies(roadmap.selectedProject?.slug)}
         notice={roadmap.notice}
         voting={roadmap.votingItemId === detailItem?.id}
         onOpenChange={(open) => {

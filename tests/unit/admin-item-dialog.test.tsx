@@ -196,7 +196,8 @@ describe("ItemDialog admin image preview", () => {
     expect(title).toHaveValue("更新后的标题")
     expect(status).toHaveValue("approved")
 
-    const retry = screen.getByRole("button", { name: "重新加载" })
+    const retry = within(screen.getByRole("region", { name: "建议图片" }))
+      .getByRole("button", { name: "重新加载" })
     expect(retry).toHaveClass("border-border", "bg-background")
     await user.click(retry)
 
