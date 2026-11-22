@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
@@ -23,6 +23,32 @@ const items: RoadmapItem[] = STATUS_COLUMNS.map((column, index) => ({
 }))
 
 describe("RoadmapBoard", () => {
+  it("pages each status independently without changing the column total", async () => {
+    const user = userEvent.setup()
+    const extraItems = ["pending", "approved"] as const
+    render(<RoadmapBoard
+      items={extraItems.flatMap((status, column) =>
+        Array.from({ length: 5 }, (_, i) => ({
+          ...items[column],
+          id: `${status}-${i}`,
+          title: `${status} ${i + 1}`,
+          sortOrder: i,
+        }))
+      )}
+      onOpenItem={vi.fn()}
+      onVote={vi.fn()}
+    />)
+
+    const pending = within(screen.getByRole("region", { name: "待处理" }))
+    const approved = within(screen.getByRole("region", { name: "已批准" }))
+    expect(pending.queryByText("pending 5")).not.toBeInTheDocument()
+    await user.click(pending.getByRole("button", { name: "下一页" }))
+    expect(pending.getByText("pending 5")).toBeInTheDocument()
+    expect(pending.queryByText("pending 1")).not.toBeInTheDocument()
+    expect(approved.getByText("approved 1")).toBeInTheDocument()
+    expect(pending.getByText("5", { selector: "[data-slot=badge]" })).toBeInTheDocument()
+  })
+
   it("renders the five required columns in product order", () => {
     render(
       <RoadmapBoard

@@ -127,20 +127,30 @@ export async function listProjects(): Promise<Project[]> {
 export async function listRoadmapItems(
   projectId: string
 ): Promise<RoadmapItem[]> {
-  const { data, error } = await getSupabaseBrowserClient()
-    .from("roadmap_items_public")
-    .select(
-      "id,project_id,title,description,status,sort_order,vote_count,has_image,image_id,created_at,updated_at"
-    )
-    .eq("project_id", projectId)
-    .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: true })
+  const client = getSupabaseBrowserClient()
+  const batchSize = 500
+  const rows = new Map<string, RoadmapItemRow>()
+  let offset = 0
+  while (true) {
+    const { data, error } = await client
+      .from("roadmap_items_public")
+      .select(
+        "id,project_id,title,description,status,sort_order,vote_count,has_image,image_id,created_at,updated_at"
+      )
+      .eq("project_id", projectId)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + batchSize - 1)
 
-  if (error) {
-    throw new Error("Roadmap 加载失败，请稍后重试")
+    if (error) throw new Error("Roadmap 加载失败，请稍后重试")
+    const batch = (data ?? []) as RoadmapItemRow[]
+    for (const row of batch) rows.set(row.id, row)
+    if (batch.length < batchSize) break
+    offset += batchSize
   }
 
-  return ((data ?? []) as RoadmapItemRow[]).map(mapRoadmapItemRow)
+  return Array.from(rows.values(), mapRoadmapItemRow)
 }
 
 export async function listRoadmapStatusHistory(

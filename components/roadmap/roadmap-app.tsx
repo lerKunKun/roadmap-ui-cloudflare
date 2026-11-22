@@ -27,8 +27,8 @@ export function RoadmapApp() {
 
   return (
     <main className="min-h-svh">
-      <div className="mx-auto flex min-h-svh max-w-[120rem] flex-col px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-4 border-b border-border/80 pb-4">
+      <div className="mx-auto flex h-dvh max-w-[120rem] flex-col px-4 py-3 sm:px-6 lg:px-8">
+        <header className="mb-4 shrink-0 border-b border-border/80 pb-4">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div className="flex min-w-0 items-start gap-3">
               <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm shadow-blue-500/20">
@@ -126,7 +126,7 @@ export function RoadmapApp() {
           </div>
         ) : null}
 
-        <section className="min-h-0 flex-1" aria-label="项目路线图">
+        <section className="min-h-36 flex-1" aria-label="项目路线图">
           {roadmap.error ? (
             <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed bg-card px-6 text-center">
               <CircleAlert className="mb-3 size-7 text-destructive" />
@@ -147,6 +147,7 @@ export function RoadmapApp() {
             </div>
           ) : (
             <RoadmapBoard
+              key={roadmap.selectedProjectId}
               items={roadmap.items}
               votingItemId={roadmap.votingItemId}
               onOpenItem={(item: RoadmapItem) => setDetailItemId(item.id)}
@@ -184,7 +185,7 @@ function RoadmapSkeleton() {
       {Array.from({ length: 5 }, (_, index) => (
         <div
           key={index}
-          className="min-h-[32rem] rounded-xl border bg-card p-3"
+          className="min-h-0 overflow-hidden rounded-xl border bg-card p-3"
         >
           <div className="mb-4 flex items-center gap-2 border-b pb-3">
             <Skeleton className="size-4 rounded-full" />

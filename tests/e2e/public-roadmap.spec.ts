@@ -43,8 +43,14 @@ function item(id: string, projectId: string, title: string, voteCount = 0) {
   }
 }
 
-async function installPublicApi(page: Page) {
-  const items = [item(ITEM_ALERT, PROJECT_ALERT, "告警通知聚合")]
+async function installPublicApi(page: Page, extraItemCount = 0) {
+  const items = [
+    item(ITEM_ALERT, PROJECT_ALERT, "告警通知聚合"),
+    ...Array.from({ length: extraItemCount }, (_, index) => ({
+      ...item(`page-item-${index + 1}`, PROJECT_ALERT, `分页条目 ${index + 1}`),
+      sort_order: index + 1,
+    })),
+  ]
   let voted = false
   let historyRequests = 0
   const mediaRequestPaths: string[] = []
@@ -251,6 +257,26 @@ test("公开端可切换项目、提交建议并按网络去重投票", async ({
       scrollWidth: board.scrollWidth,
     }))
   expect(boardMetrics.scrollWidth).toBeGreaterThan(boardMetrics.clientWidth)
+})
+
+test("长列独立翻页，桌面和手机看板保持在视口内", async ({ page }) => {
+  await installPublicApi(page, 7)
+  await page.setViewportSize({ width: 1440, height: 760 })
+  await page.goto("/")
+  await page.getByLabel("切换项目").selectOption(PROJECT_ALERT)
+  const pendingColumn = page.getByRole("region", { name: "待处理" })
+  const board = page.locator(".roadmap-board").filter({ has: pendingColumn })
+  await expect(pendingColumn.getByText("告警通知聚合")).toBeVisible()
+  const initialHeight = await board.evaluate((element) => element.clientHeight)
+  await pendingColumn.getByRole("button", { name: "下一页" }).click()
+  await expect(pendingColumn.getByText("分页条目 7")).toBeVisible()
+  await expect(pendingColumn.getByText("告警通知聚合")).toHaveCount(0)
+  expect(await board.evaluate((element) => element.clientHeight)).toBe(initialHeight)
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(760)
+
+  await page.setViewportSize({ width: 390, height: 568 })
+  await expect(pendingColumn.getByRole("button", { name: "上一页" })).toBeInViewport()
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(568)
 })
 
 test("详情弹窗按每次打开刷新状态时间轴并适配移动端", async ({ page }) => {

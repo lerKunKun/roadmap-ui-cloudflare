@@ -167,7 +167,7 @@ function AdminWorkspace({ onLogout }: { onLogout(): Promise<void> }) {
   }
 
   return (
-    <main className="min-h-svh bg-muted/20">
+    <main className="flex h-dvh flex-col bg-muted/20">
       <AdminToolbar
         projects={projects}
         selectedProjectId={selectedProjectId}
@@ -178,7 +178,7 @@ function AdminWorkspace({ onLogout }: { onLogout(): Promise<void> }) {
         onCreateItem={() => setItemEditor("new")}
         onLogout={() => void onLogout()}
       />
-      <div className="mx-auto max-w-[120rem] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col px-4 py-3 sm:px-6 lg:px-8">
         <div className="mb-4 flex min-h-8 flex-wrap items-center gap-3 text-sm">
           <p className="font-medium">{selectedProject ? `${selectedProject.name} · ${items.length} 个条目` : "尚未创建项目"}</p>
           <p className="text-xs text-muted-foreground">拖动卡片或使用阶段下拉框调整进度</p>
@@ -195,7 +195,9 @@ function AdminWorkspace({ onLogout }: { onLogout(): Promise<void> }) {
         {loading ? (
           <div className="flex min-h-80 items-center justify-center text-sm text-muted-foreground"><LoaderCircle className="mr-2 size-4 animate-spin" />正在加载管理数据…</div>
         ) : selectedProject ? (
-          <AdminBoard items={items} movingItemId={movingItemId} onEdit={setItemEditor} onDelete={(item) => void removeItem(item)} onMove={moveItem} />
+          <div className="min-h-36 flex-1">
+            <AdminBoard key={selectedProjectId} items={items} movingItemId={movingItemId} onEdit={setItemEditor} onDelete={(item) => void removeItem(item)} onMove={moveItem} />
+          </div>
         ) : (
           <div className="flex min-h-80 flex-col items-center justify-center rounded-xl border border-dashed bg-background text-center">
             <p className="text-sm text-muted-foreground">添加第一个项目后即可管理 Roadmap。</p>

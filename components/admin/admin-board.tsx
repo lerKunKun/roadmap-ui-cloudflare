@@ -1,8 +1,10 @@
 "use client"
 
+import { useState } from "react"
 import {
   closestCenter,
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   useDraggable,
@@ -11,11 +13,11 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core"
-import { CSS } from "@dnd-kit/utilities"
 import { CalendarClock, GripVertical, Pencil, ThumbsUp, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ColumnPages } from "@/components/roadmap/column-pages"
 import {
   STATUS_COLUMNS,
   type RoadmapItem,
@@ -37,17 +39,21 @@ export function AdminBoard({
   onDelete,
   onMove,
 }: AdminBoardProps) {
+  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const draggedItem = items.find((item) => item.id === draggedId)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor),
   )
 
   function dragEnd(event: DragEndEvent) {
+    setDraggedId(null)
     const itemId = String(event.active.id)
     const overId = event.over ? String(event.over.id) : ""
     const overItem = overId.startsWith("item:")
       ? items.find((item) => item.id === overId.slice(5))
       : null
+    if (overItem?.id === itemId) return
     const status = overItem?.status ?? overId.slice(7)
     if (!STATUS_COLUMNS.some((column) => column.value === status)) return
     const destination = items
@@ -60,7 +66,9 @@ export function AdminBoard({
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter}
+      onDragStart={({ active }) => setDraggedId(String(active.id))}
+      onDragCancel={() => setDraggedId(null)} onDragEnd={dragEnd}>
       <div className="roadmap-board grid grid-flow-col gap-3 overflow-x-auto pb-3" aria-label="管理 Roadmap 看板">
         {STATUS_COLUMNS.map((column) => {
           const columnItems = items
@@ -80,6 +88,13 @@ export function AdminBoard({
           )
         })}
       </div>
+      <DragOverlay>
+        {draggedItem ? (
+          <div className="rounded-xl border bg-background p-3 text-sm font-semibold shadow-lg">
+            {draggedItem.title}
+          </div>
+        ) : null}
+      </DragOverlay>
     </DndContext>
   )
 }
@@ -107,18 +122,19 @@ function AdminColumn({
     <section
       ref={setNodeRef}
       aria-label={label}
-      className={`min-h-[34rem] rounded-xl border bg-card p-3 transition-colors ${isOver ? "border-primary bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
+      className={`flex min-h-0 min-w-0 flex-col rounded-xl border bg-card p-3 transition-colors ${isOver ? "border-primary bg-blue-50/50 dark:bg-blue-950/20" : ""}`}
     >
-      <div className="mb-3 flex items-center gap-2 border-b pb-3">
+      <div className="mb-3 flex shrink-0 items-center gap-2 border-b pb-3">
         <span className="size-2 rounded-full bg-primary/70" />
         <h2 className="text-sm font-semibold">{label}</h2>
         <Badge variant="secondary" className="ml-auto tabular-nums">{items.length}</Badge>
       </div>
-      <div className="grid gap-2.5">
-        {items.length === 0 ? (
+      <ColumnPages
+        items={items}
+        empty={
           <p className="rounded-lg border border-dashed px-3 py-10 text-center text-xs text-muted-foreground">拖放条目到这里</p>
-        ) : null}
-        {items.map((item) => (
+        }
+        renderItem={(item) => (
           <AdminCard
             key={item.id}
             item={item}
@@ -127,8 +143,8 @@ function AdminColumn({
             onDelete={onDelete}
             onMove={onMove}
           />
-        ))}
-      </div>
+        )}
+      />
     </section>
   )
 }
@@ -150,7 +166,6 @@ function AdminCard({
     attributes,
     listeners,
     setNodeRef: setDraggableRef,
-    transform,
     isDragging,
   } = useDraggable({ id: item.id })
   const {
@@ -166,7 +181,6 @@ function AdminCard({
   return (
     <article
       ref={setCardRef}
-      style={{ transform: CSS.Translate.toString(transform) }}
       className={`rounded-xl border bg-background p-3 shadow-xs ${isDragging ? "z-10 opacity-70 shadow-lg" : ""} ${isOver && !isDragging ? "border-primary" : ""}`}
     >
       <div className="flex items-start gap-2">

@@ -8,6 +8,7 @@ import {
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
+import { ColumnPages } from "@/components/roadmap/column-pages"
 import { RoadmapCard } from "@/components/roadmap/roadmap-card"
 import {
   STATUS_COLUMNS,
@@ -82,9 +83,9 @@ export function RoadmapBoard({
             key={column.value}
             role="region"
             aria-label={column.label}
-            className="flex min-h-[32rem] min-w-0 flex-col rounded-xl border border-blue-100/80 bg-white/85 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-white/10 dark:bg-card/80"
+            className="flex min-h-0 min-w-0 flex-col rounded-xl border border-blue-100/80 bg-white/85 p-3 shadow-[0_1px_2px_rgba(15,23,42,0.03)] dark:border-white/10 dark:bg-card/80"
           >
-            <header className="mb-3 flex items-center gap-2 border-b border-border/70 pb-3">
+            <header className="mb-3 flex shrink-0 items-center gap-2 border-b border-border/70 pb-3">
               <StatusIcon className={`size-4 ${presentation.accent}`} />
               <h2 className="text-sm font-semibold tracking-tight">
                 {column.label}
@@ -97,9 +98,9 @@ export function RoadmapBoard({
               </Badge>
             </header>
 
-            <div className="flex flex-col gap-2.5">
-              {columnItems.length > 0 ? (
-                columnItems.map((item) => (
+            <ColumnPages
+              items={columnItems}
+              renderItem={(item) => (
                   <RoadmapCard
                     key={item.id}
                     item={item}
@@ -107,15 +108,15 @@ export function RoadmapBoard({
                     onOpen={() => onOpenItem(item)}
                     onVote={() => onVote(item.id)}
                   />
-                ))
-              ) : (
+              )}
+              empty={
                 <div className="flex min-h-28 flex-col items-center justify-center rounded-lg border border-dashed border-blue-100 bg-blue-50/30 px-4 text-center dark:border-white/10 dark:bg-white/[0.02]">
                   <p className="text-xs font-medium text-muted-foreground">
                     当前阶段暂无条目
                   </p>
                 </div>
-              )}
-            </div>
+              }
+            />
           </section>
         )
       })}
