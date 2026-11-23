@@ -71,6 +71,13 @@ export function AdminLogin({ onSubmit, pending, error }: AdminLoginProps) {
           </Button>
         </form>
 
+        <a
+          href="https://admin.telljax.com/workbench/api/sso/start"
+          className="mt-4 block rounded-lg border px-3 py-2 text-center text-sm font-medium hover:bg-muted"
+        >
+          使用工作台账号登录
+        </a>
+
         <Link
           href="/"
           className="mt-6 block text-center text-xs text-muted-foreground hover:text-foreground hover:underline"
