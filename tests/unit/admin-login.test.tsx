@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from "vitest"
 import { AdminLogin } from "@/components/admin/admin-login"
 
 describe("AdminLogin", () => {
+  it("offers the workbench login at the canonical admin host", () => {
+    render(<AdminLogin onSubmit={vi.fn()} pending={false} error={null} />)
+    expect(screen.getByRole("link", {name:"使用工作台账号登录"})).toHaveAttribute("href", "https://admin.telljax.com/workbench/api/sso/start")
+  })
   it("只显示管理密码，不暴露邮箱输入框", () => {
     render(<AdminLogin onSubmit={vi.fn()} pending={false} error={null} />)
 

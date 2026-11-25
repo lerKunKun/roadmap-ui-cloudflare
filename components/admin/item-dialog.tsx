@@ -36,6 +36,7 @@ interface ItemDialogProps {
   nextSortOrder: number
   onOpenChange(open: boolean): void
   onSave(input: RoadmapItemInput): Promise<void>
+  onForward?(itemId: string, summary: string): Promise<void>
 }
 
 type PreviewState =
@@ -56,6 +57,7 @@ export function ItemDialog({
   nextSortOrder,
   onOpenChange,
   onSave,
+  onForward,
 }: ItemDialogProps) {
   const [title, setTitle] = useState(item?.title ?? "")
   const [description, setDescription] = useState(item?.description ?? "")
@@ -63,6 +65,9 @@ export function ItemDialog({
   const [sortOrder, setSortOrder] = useState(item?.sortOrder ?? nextSortOrder)
   const [createdDate, setCreatedDate] = useState(localDateInputValue)
   const [pending, setPending] = useState(false)
+  const [forwarding, setForwarding] = useState(false)
+  const [forwarded, setForwarded] = useState(false)
+  const [forwardSummary, setForwardSummary] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [previewAttempt, setPreviewAttempt] = useState(0)
   const [preview, setPreview] = useState<PreviewState>(() =>
@@ -124,6 +129,18 @@ export function ItemDialog({
     onOpenChange(open)
   }
 
+  async function forward() {
+    if (!item || !onForward || !forwardSummary.trim()) return
+    setForwarding(true)
+    setError(null)
+    try {
+      await onForward(item.id, forwardSummary.trim())
+      setForwarded(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "工作台未确认接收")
+    } finally { setForwarding(false) }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setPending(true)
@@ -153,6 +170,15 @@ export function ItemDialog({
           <DialogDescription>
             可直接调整阶段；公开用户提交的建议默认进入“待处理”。
           </DialogDescription>
+          {item && onForward && ["approved", "in_progress", "completed"].includes(item.status) ? <div className="mt-2 space-y-2">
+            <p className="text-xs text-muted-foreground">发送已保存的标题「{item.title}」、票数与以下审核摘要；请勿填写个人信息。不发送原文、图片或回复。</p>
+            <Label htmlFor="workbench-summary">转交摘要</Label>
+            <Textarea id="workbench-summary" value={forwardSummary} onChange={e => setForwardSummary(e.target.value)} maxLength={2000} disabled={forwarding || forwarded} />
+            <Button type="button" variant="outline" disabled={pending || forwarding || forwarded || !forwardSummary.trim()} onClick={() => void forward()}>
+              {forwarding ? "转交中…" : forwarded ? "已转交工作台" : "转交工作台评估"}
+            </Button>
+            {forwarded ? <a className="ml-3 text-sm underline" href="https://admin.biounetwork.com/roadmap/manage">打开内部评估</a> : null}
+          </div> : null}
         </DialogHeader>
         <form className="grid gap-4" onSubmit={submit}>
           <div className="grid gap-1.5">
